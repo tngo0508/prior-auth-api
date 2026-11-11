@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PROTOTYPE: Prior Authorization API walkthrough</title>
+<style>
+  :root { --bg:#fff; --fg:#1c1c1c; --muted:#5c5c5c; --line:#cfcfcf; --card:#f6f6f4; --accent:#0b5cad; --ok:#1b6e3c; --bad:#a3262a; --warn:#7a5200; --warnbg:#fff3cd; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#17171a; --fg:#ececec; --muted:#a8a8a8; --line:#3d3d42; --card:#222226; --accent:#7db8f2; --ok:#7fd39f; --bad:#f09595; --warn:#f0cf7a; --warnbg:#3a3112; } }
+  * { box-sizing: border-box; }
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 0; padding: 16px; background: var(--bg); color: var(--fg); }
+  h1 { font-size: 20px; margin: 0 0 4px; } h2 { font-size: 16px; margin: 0 0 4px; } h3 { font-size: 14px; margin: 16px 0 6px; }
+  p { margin: 0 0 10px; } .muted { color: var(--muted); font-size: 13px; }
+  .banner { background: var(--warnbg); color: var(--warn); border: 1px solid var(--line); padding: 8px 12px; border-radius: 6px; margin-bottom: 14px; font-size: 13px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px; min-width: 0; }
+  button, select, input { font: inherit; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
+  button { cursor: pointer; } button:hover { border-color: var(--accent); }
+  .steps button { display: block; width: 100%; text-align: left; margin: 6px 0; }
+  .plain { border-left: 3px solid var(--accent); padding: 6px 10px; margin: 10px 0; background: var(--bg); }
+  .http { font: 13px ui-monospace, Consolas, monospace; color: var(--accent); word-break: break-all; }
+  pre { font: 12px/1.45 ui-monospace, Consolas, monospace; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; max-height: 320px; overflow: auto; margin: 6px 0; white-space: pre-wrap; word-break: break-word; }
+  details summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+  .req { border: 1px solid var(--line); border-radius: 6px; padding: 10px; margin: 8px 0; background: var(--bg); }
+  .status { font-weight: 600; } .Approved { color: var(--ok); } .Denied { color: var(--bad); } .Pended, .InfoRequested { color: var(--warn); }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; } .row input[type=text] { flex: 1; min-width: 140px; }
+  ol { margin: 0 0 10px; padding-left: 20px; }
+</style>
+</head>
+<body>
+<div class="banner"><b>PROTOTYPE.</b> Throwaway code for learning. Everything is in memory and synthetic. Restarting the app wipes it.</div>
+<h1>Prior Authorization API walkthrough</h1>
+<p class="muted">You play both sides. On the left you are a clinic's EHR calling the API. On the right you are the agency's reviewer. Go top to bottom on the left, then decide on the right, then check the status again.</p>
+
+<div class="cols">
+  <section class="card">
+    <h2>Clinic's EHR (the caller)</h2>
+    <p class="muted">In real life this is software at a contracted provider. Each button makes one real API call to this server.</p>
+    <label>Service the clinic wants to deliver<br>
+      <select id="service">
+        <option value="H2019">H2019 Therapeutic Behavioral Services</option>
+        <option value="H2012">H2012 Day Treatment</option>
+        <option value="S5145">S5145 Therapeutic Foster Care</option>
+        <option value="H0019">H0019 Residential Treatment</option>
+        <option value="90834">90834 Psychotherapy (not on the list)</option>
+      </select>
+    </label>
+    <div class="steps">
+      <button id="btnNeed">Step 1 and 2: Does this need approval, and what paperwork?</button>
+      <button id="btnSubmit">Step 3: Send the authorization request</button>
+      <button id="btnStatus">Step 4: Ask for the current status of my last request</button>
+    </div>
+
+    <h3>What just happened</h3>
+    <div id="plain" class="plain">Nothing yet. Press Step 1.</div>
+    <div id="http" class="http"></div>
+    <details id="sentBox" hidden><summary>What the EHR sent (FHIR JSON)</summary><pre id="sent"></pre></details>
+    <details id="gotBox" hidden open><summary>What the API answered</summary><pre id="got"></pre></details>
+  </section>
+
+  <section class="card">
+    <h2>Reviewer (agency clinician)</h2>
+    <p class="muted">This side is not part of the API. It stands for whatever screen staff use to decide. The API only carries the request in and the decision out.</p>
+    <div id="queue"></div>
+  </section>
+</div>
+
+<section class="card" style="margin-top:16px">
+  <h2>How to read this</h2>
+  <ol>
+    <li><b>Step 1 and 2</b> are the rule's "which services need prior authorization" and "what documentation is required". Here it is a simple list. The full standards for these are Da Vinci CRD and DTR.</li>
+    <li><b>Step 3</b> is the request. The standard is Da Vinci PAS. The EHR sends a FHIR <code>Bundle</code> holding a <code>Claim</code> marked <code>preauthorization</code>. The API answers with a <code>ClaimResponse</code>.</li>
+    <li>The first answer is almost always <b>pended</b> (code A4), because a person has to decide.</li>
+    <li>After the reviewer acts, <b>Step 4</b> returns approved (A1, with an end date and an authorization number), denied (A3, with a specific reason), or still pended with a note saying what is missing.</li>
+  </ol>
+</section>
+
+<script>
+const $ = id => document.getElementById(id);
+let lastId = null;
+
+function show(plain, method, url, sent, got) {
+  $('plain').textContent = plain;
+  $('http').textContent = method + ' ' + url;
+  $('sentBox').hidden = !sent; if (sent) $('sent').textContent = JSON.stringify(sent, null, 2);
+  $('gotBox').hidden = false; $('got').textContent = JSON.stringify(got, null, 2);
+}
+
+function bundle(requestId, code) {
+  return { resourceType: 'Bundle', type: 'collection', entry: [
+    { fullUrl: 'urn:uuid:11111111-1111-1111-1111-111111111111', resource: {
+        resourceType: 'Claim',
+        identifier: [{ system: 'http://example.org/provider/claim-id', value: requestId }],
+        status: 'active',
+        type: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/claim-type', code: 'professional' }] },
+        use: 'preauthorization',
+        patient: { reference: 'urn:uuid:22222222-2222-2222-2222-222222222222' },
+        created: new Date().toISOString().slice(0, 10),
+        insurer: { display: 'County Behavioral Health Plan (synthetic)' },
+        provider: { display: 'Example Youth Services Clinic (synthetic)' },
+        priority: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/processpriority', code: 'normal' }] },
+        insurance: [{ sequence: 1, focal: true, coverage: { display: 'Synthetic Medi-Cal coverage' } }],
+        item: [{ sequence: 1, productOrService: { coding: [{ code }] } }] } },
+    { fullUrl: 'urn:uuid:22222222-2222-2222-2222-222222222222', resource: {
+        resourceType: 'Patient', name: [{ family: 'Testpatient', given: ['Alex'] }], birthDate: '2012-04-05' } } ] };
+}
+
+function explain(response) {
+  if (response.resourceType === 'OperationOutcome') return 'The API rejected the call: ' + response.issue[0].diagnostics;
+  const r = response.entry[0].resource;
+  const code = r.item[0].adjudication[0].extension[0].extension[0].valueCodeableConcept.coding[0].code;
+  const meaning = { A1: 'APPROVED', A3: 'DENIED', A4: 'PENDED (waiting for a reviewer)', NA: 'NO APPROVAL NEEDED' }[code] || code;
+  let text = 'Answer: ' + meaning + '. The API said: "' + r.disposition + '"';
+  if (r.preAuthRef) text += ' Authorization number ' + r.preAuthRef + '.';
+  if (code === 'A4') text += ' Now act as the reviewer on the right, then press Step 4.';
+  return text;
+}
+
+$('btnNeed').onclick = async () => {
+  const code = $('service').value, url = '/requirements?code=' + code;
+  const got = await (await fetch(url)).json();
+  const plain = got.length
+    ? 'Yes, ' + code + ' needs approval. Paperwork required: ' + got[0].documentation.join('; ') + '. Next, press Step 3.'
+    : 'No, ' + code + ' is not on the list, so no approval is needed. You can still press Step 3 to see how the API answers.';
+  show(plain, 'GET', url, null, got);
+};
+
+$('btnSubmit').onclick = async () => {
+  lastId = 'REQ-' + Date.now().toString().slice(-6);
+  const sent = bundle(lastId, $('service').value), url = '/fhir/Claim/$submit';
+  const got = await (await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/fhir+json' }, body: JSON.stringify(sent) })).json();
+  show('Sent request ' + lastId + '. ' + explain(got), 'POST', url, sent, got);
+  refreshQueue();
+};
+
+$('btnStatus').onclick = async () => {
+  if (!lastId) { $('plain').textContent = 'Send a request first (Step 3).'; return; }
+  const sent = bundle(lastId, $('service').value), url = '/fhir/Claim/$inquire';
+  const got = await (await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/fhir+json' }, body: JSON.stringify(sent) })).json();
+  show('Status of ' + lastId + '. ' + explain(got), 'POST', url, sent, got);
+};
+
+async function decide(id, action, fields) {
+  await fetch('/reviewer/' + id + '/decide', { method: 'POST', body: new URLSearchParams({ action, ...fields }) });
+  refreshQueue();
+}
+
+function el(tag, props, ...children) {
+  const node = Object.assign(document.createElement(tag), props || {});
+  children.forEach(c => node.append(c));
+  return node;
+}
+
+async function refreshQueue() {
+  const items = await (await fetch('/prototype/state')).json();
+  const queue = $('queue'); queue.replaceChildren();
+  if (!items.length) { queue.append(el('p', { className: 'muted', textContent: 'No requests yet. Send one from the left.' })); return; }
+  for (const r of items.reverse()) {
+    const box = el('div', { className: 'req' },
+      el('div', {}, el('b', { textContent: r.claimIdentifier }), ' · ' + r.serviceCode + ' ' + r.serviceName),
+      el('div', { className: 'muted', textContent: r.patientName + ' · ' + r.providerName }),
+      el('div', { className: 'status ' + r.status, textContent: r.status + (r.authNumber ? ' · ' + r.authNumber : '') + (r.reason ? ' · ' + r.reason : '') }));
+    if (r.status === 'Pended' || r.status === 'InfoRequested') {
+      const through = el('input', { type: 'date' });
+      const reason = el('input', { type: 'text', placeholder: 'specific denial reason' });
+      const missing = el('input', { type: 'text', placeholder: 'what is missing' });
+      box.append(
+        el('div', { className: 'row' }, 'Approve through ', through, el('button', { textContent: 'Approve', onclick: () => decide(r.id, 'approve', { through: through.value }) })),
+        el('div', { className: 'row' }, reason, el('button', { textContent: 'Deny', onclick: () => decide(r.id, 'deny', { text: reason.value }) })),
+        el('div', { className: 'row' }, missing, el('button', { textContent: 'Request info', onclick: () => decide(r.id, 'info', { text: missing.value }) })));
+    }
+    box.append(el('details', {}, el('summary', { textContent: 'History' }), el('pre', { textContent: r.history.join('\n') })));
+    queue.append(box);
+  }
+}
+refreshQueue();
+</script>
+</body>
+</html>

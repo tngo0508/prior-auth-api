@@ -10,7 +10,6 @@
 // =====================================================================================
 
 using System.Collections.Concurrent;
-using System.Net;
 using System.Text;
 using System.Text.Json;
 using Hl7.Fhir.Model;
@@ -128,7 +127,9 @@ app.MapGet("/fhir/ClaimResponse/{id}", (string id) =>
 
 // ---------- Reviewer side (stands in for the existing authorization system) -----------
 
-app.MapGet("/", () => Results.Content(ReviewerPage(), "text/html"));
+// The walkthrough page (wwwroot/index.html) plays both the provider and the reviewer.
+app.UseDefaultFiles();
+app.UseStaticFiles();
 
 app.MapPost("/reviewer/{id}/decide", async (string id, HttpRequest http) =>
 {
@@ -160,7 +161,7 @@ app.MapPost("/reviewer/{id}/decide", async (string id, HttpRequest http) =>
             request.Log($"Rejected reviewer action '{action}': an approval needs an end date, a denial or information request needs text.");
             break;
     }
-    return Results.Redirect("/");
+    return Results.Ok();
 });
 
 // Full in-memory state, for inspection.
@@ -259,45 +260,6 @@ ClaimResponse ToClaimResponse(AuthRequest request)
         PreAuthPeriod = request.AuthorizedThrough is { } through ? new Period { End = through.ToString("yyyy-MM-dd") } : null,
         Item = [new ClaimResponse.ItemComponent { ItemSequence = 1, Adjudication = [adjudication] }],
     };
-}
-
-string ReviewerPage()
-{
-    static string E(string? s) => WebUtility.HtmlEncode(s ?? "");
-    var html = new StringBuilder("""
-        <!doctype html><meta charset="utf-8"><title>PROTOTYPE reviewer queue</title>
-        <style>
-          body{font:14px system-ui;margin:24px;max-width:1100px}
-          table{border-collapse:collapse;width:100%} td,th{border:1px solid #ccc;padding:6px 8px;text-align:left;vertical-align:top}
-          .banner{background:#fff3cd;border:1px solid #e0c36a;padding:8px 12px;margin-bottom:16px}
-          form{display:inline-block;margin:2px 8px 2px 0} small{color:#555}
-        </style>
-        <div class="banner"><b>PROTOTYPE.</b> Stands in for the existing authorization system. In-memory, synthetic data only. Refresh to see new requests.</div>
-        <h1>Reviewer queue</h1>
-        <table><tr><th>Request</th><th>Service</th><th>Status</th><th>Decide</th><th>History</th></tr>
-        """);
-
-    foreach (var r in store.Values.OrderBy(r => r.ReceivedAt))
-    {
-        var open = r.Status is AuthStatus.Pended or AuthStatus.InfoRequested;
-        html.Append($"""
-            <tr><td><b>{E(r.ClaimIdentifier)}</b><br>{E(r.PatientName)}<br><small>{E(r.ProviderName)}<br>ClaimResponse/{E(r.Id)}</small></td>
-            <td>{E(r.ServiceCode)}<br>{E(r.ServiceName)}</td>
-            <td><b>{r.Status}</b><br>{E(r.AuthNumber)} {E(r.Reason)}</td><td>
-            """);
-        if (open)
-            html.Append($"""
-                <form method="post" action="/reviewer/{E(r.Id)}/decide"><input type="hidden" name="action" value="approve">
-                  through <input type="date" name="through" required> <button>Approve</button></form><br>
-                <form method="post" action="/reviewer/{E(r.Id)}/decide"><input type="hidden" name="action" value="deny">
-                  <input name="text" placeholder="specific denial reason" required> <button>Deny</button></form><br>
-                <form method="post" action="/reviewer/{E(r.Id)}/decide"><input type="hidden" name="action" value="info">
-                  <input name="text" placeholder="what is missing" required> <button>Request info</button></form>
-                """);
-        html.Append("</td><td><small>").Append(string.Join("<br>", r.History.Select(E))).Append("</small></td></tr>");
-    }
-    if (store.IsEmpty) html.Append("<tr><td colspan=5>No requests yet. Send requests.http or sample-pas-request.json to /fhir/Claim/$submit.</td></tr>");
-    return html.Append("</table>").ToString();
 }
 
 // ---------- Types ---------------------------------------------------------------------
