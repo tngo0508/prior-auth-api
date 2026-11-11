@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prior authorization review queue</title>
+<style>
+  :root { --bg:#fff; --fg:#1c1c1c; --muted:#5c5c5c; --line:#cfcfcf; --card:#f6f6f4; --accent:#0b5cad; --ok:#1b6e3c; --bad:#a3262a; --warn:#7a5200; --warnbg:#fff3cd; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#17171a; --fg:#ececec; --muted:#a8a8a8; --line:#3d3d42; --card:#222226; --accent:#7db8f2; --ok:#7fd39f; --bad:#f09595; --warn:#f0cf7a; --warnbg:#3a3112; } }
+  * { box-sizing: border-box; }
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 0 auto; padding: 16px; max-width: 980px; background: var(--bg); color: var(--fg); }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+  .banner { background: var(--warnbg); color: var(--warn); border: 1px solid var(--line); padding: 8px 12px; border-radius: 6px; margin-bottom: 14px; font-size: 13px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  button, input { font: inherit; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
+  button { cursor: pointer; } button:hover { border-color: var(--accent); }
+  .top { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+  .req { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin: 10px 0; }
+  .status { font-weight: 600; } .Approved { color: var(--ok); } .Denied { color: var(--bad); } .Pended, .InformationRequested { color: var(--warn); }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 8px; } .row input[type=text] { flex: 1; min-width: 160px; }
+  .error { color: var(--bad); font-size: 13px; margin-top: 6px; }
+  details summary { cursor: pointer; font-size: 13px; color: var(--muted); margin-top: 8px; }
+  ul { margin: 6px 0 0; padding-left: 18px; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="banner"><b>Development build.</b> No sign-in yet. Use synthetic data only.</div>
+<h1>Prior authorization review queue</h1>
+<div class="top">
+  <label>Reviewer name <input id="reviewer" type="text" placeholder="your name"></label>
+  <button id="refresh">Refresh</button>
+  <span id="count" class="muted"></span>
+</div>
+<div id="queue"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+try { $('reviewer').value = localStorage.getItem('reviewer') || ''; } catch {}
+$('reviewer').oninput = () => { try { localStorage.setItem('reviewer', $('reviewer').value); } catch {} };
+$('refresh').onclick = load;
+
+function el(tag, props, ...children) {
+  const node = Object.assign(document.createElement(tag), props || {});
+  children.forEach(c => node.append(c));
+  return node;
+}
+
+async function decide(id, action, body, errorBox) {
+  const response = await fetch('/internal/requests/' + id + '/' + action, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...body, reviewer: $('reviewer').value }) });
+  if (response.ok) { load(); return; }
+  const problem = await response.json().catch(() => ({}));
+  errorBox.textContent = problem.detail || 'The action was refused (' + response.status + ').';
+}
+
+async function load() {
+  const items = await (await fetch('/internal/requests')).json();
+  const open = items.filter(r => r.isOpen).length;
+  $('count').textContent = items.length + ' requests, ' + open + ' waiting for a decision';
+  const queue = $('queue'); queue.replaceChildren();
+  if (!items.length) queue.append(el('p', { className: 'muted', textContent: 'No requests have been received.' }));
+  for (const r of items) {
+    const box = el('div', { className: 'req' },
+      el('div', {}, el('b', { textContent: r.serviceCode + ' ' + r.serviceName })),
+      el('div', { className: 'muted', textContent: r.memberName + ' · ' + r.providerName + ' · provider request ' + r.providerRequestId }),
+      el('div', { className: 'status ' + r.status, textContent:
+        ({ InformationRequested: 'Information requested', NotRequired: 'Not required' }[r.status] || r.status) +
+        (r.authorizationNumber ? ' · ' + r.authorizationNumber + ' through ' + r.authorizedThrough : '') +
+        (r.reason ? ' · ' + r.reason : '') }));
+    if (r.isOpen) {
+      const error = el('div', { className: 'error' });
+      const through = el('input', { type: 'date' });
+      const reason = el('input', { type: 'text', placeholder: 'specific denial reason' });
+      const missing = el('input', { type: 'text', placeholder: 'what is missing' });
+      box.append(
+        el('div', { className: 'row' }, 'Approve through ', through, el('button', { textContent: 'Approve', onclick: () => decide(r.id, 'approve', { through: through.value || '0001-01-01' }, error) })),
+        el('div', { className: 'row' }, reason, el('button', { textContent: 'Deny', onclick: () => decide(r.id, 'deny', { reason: reason.value }, error) })),
+        el('div', { className: 'row' }, missing, el('button', { textContent: 'Request information', onclick: () => decide(r.id, 'request-information', { missing: missing.value }, error) })),
+        error);
+    }
+    const history = el('ul');
+    r.history.forEach(h => history.append(el('li', { textContent: new Date(h.atUtc + 'Z').toLocaleString() + ' · ' + h.actor + ' · ' + h.text })));
+    box.append(el('details', {}, el('summary', { textContent: 'History (' + r.history.length + ')' }), history));
+    queue.append(box);
+  }
+}
+load();
+</script>
+</body>
+</html>

@@ -2,39 +2,49 @@
 
 A payer-side FHIR Prior Authorization API for a California county Medi-Cal behavioral health plan, written in C# on ASP.NET Core.
 
-It exists to meet the Prior Authorization API requirement of the CMS Interoperability and Prior Authorization Final Rule (CMS-0057-F), which DHCS applies to county Mental Health Plans and DMC-ODS plans through BHIN 26-008. The compliance date is January 1, 2027.
+It exists to meet the Prior Authorization API requirement of the CMS Interoperability and Prior Authorization Final Rule (CMS-0057-F), which DHCS applies to county Mental Health Plans and DMC-ODS plans through BHIN 26-008.
 
 ## Status
 
-Prototype only. Nothing here is production code, and it must only ever be run with synthetic data.
+In development. There is no sign-in yet, so run it locally with synthetic data only. See [status and open questions](docs/04-status-and-open-questions.md).
 
-## What the API must do
+## Documentation
 
-- List the covered services that need prior authorization (drugs are excluded).
-- State the documentation the plan requires for each.
-- Accept an authorization request and return a response: approved with an end date, denied with a specific reason, or more information needed.
+Read these in order:
 
-## Design decisions so far
+1. [Overview](docs/01-overview.md): what the API is, why it exists, and the three questions it answers.
+2. [How it works](docs/02-how-it-works.md): the request flow, the states, the parts of the code and the data, with diagrams.
+3. [Running and testing](docs/03-running-and-testing.md): how to run the prototype and the service, the endpoints, and the tests.
+4. [Status and open questions](docs/04-status-and-open-questions.md): what is done, what is missing, and the assumptions still to confirm.
 
-- The agency is the payer, so this is the server that providers' EHRs call.
-- The API is a facade. Every request pends for a human reviewer; there is no automated approval.
-- FHIR only. The X12 278 transaction is not used, relying on CMS enforcement discretion (GL-2024-02).
-- Delivery order: Da Vinci PAS submit and inquiry plus a requirements list first, then CRD and DTR.
+[GLOSSARY.md](GLOSSARY.md) defines the project's business terms.
 
-## Run the prototype
+## Quick start
+
+Learn the flow with the two-sided prototype at http://localhost:5019:
 
 ```bash
 dotnet run --project prototype/PriorAuth.Prototype --no-launch-profile --urls http://localhost:5019
 ```
 
-Open http://localhost:5019 for the reviewer page, and send the requests in [requests.http](prototype/PriorAuth.Prototype/requests.http) in order.
+Run the service, with its reviewer queue at http://localhost:5020:
 
-The prototype has no authentication, no persistence, and its FHIR output has not been validated against the Da Vinci profiles. The service list in it is placeholder data.
+```bash
+dotnet run --project src/PriorAuth.Api --no-launch-profile --urls http://localhost:5020
+```
+
+Run the tests:
+
+```bash
+dotnet test
+```
 
 ## Layout
 
-- [prototype/PriorAuth.Prototype](prototype/PriorAuth.Prototype): throwaway prototype of the submit, review and inquire flow.
-- [GLOSSARY.md](GLOSSARY.md): the project's domain language.
+- [src/PriorAuth.Api](src/PriorAuth.Api): the service.
+- [tests/PriorAuth.Api.Tests](tests/PriorAuth.Api.Tests): integration tests.
+- [prototype/PriorAuth.Prototype](prototype/PriorAuth.Prototype): throwaway learning prototype.
+- [docs](docs): documentation, diagrams and screenshots.
 
 ## References
 
@@ -44,4 +54,4 @@ The prototype has no authentication, no persistence, and its FHIR output has not
 - [Da Vinci Coverage Requirements Discovery (CRD)](https://hl7.org/fhir/us/davinci-crd/)
 - [Da Vinci Documentation Templates and Rules (DTR)](https://hl7.org/fhir/us/davinci-dtr/)
 
-Work is tracked in this repository's GitHub issues.
+Work is tracked in this repository's [GitHub issues](https://github.com/tngo0508/prior-auth-api/issues).

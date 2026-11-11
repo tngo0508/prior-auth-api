@@ -1,0 +1,29 @@
+{
+  "_comment": "PLACEHOLDER DATA. The real list and documentation rules must be supplied and signed off by the plan's utilization management staff (GitHub issue #1).",
+  "ServiceRequirements": [
+    {
+      "Code": "H2019",
+      "Name": "Therapeutic Behavioral Services",
+      "Program": "SMHS",
+      "Documentation": [ "Current assessment", "Client plan showing TBS need", "Target behaviours and transition plan" ]
+    },
+    {
+      "Code": "H2012",
+      "Name": "Day Treatment Intensive / Day Rehabilitation",
+      "Program": "SMHS",
+      "Documentation": [ "Current assessment", "Proposed schedule and hours per day", "Reason a lower level of care is insufficient" ]
+    },
+    {
+      "Code": "S5145",
+      "Name": "Therapeutic Foster Care",
+      "Program": "SMHS",
+      "Documentation": [ "Child and Family Team recommendation", "Current assessment" ]
+    },
+    {
+      "Code": "H0019",
+      "Name": "Residential Treatment",
+      "Program": "DMC-ODS",
+      "Documentation": [ "ASAM level of care assessment", "Diagnosis", "Requested length of stay" ]
+    }
+  ]
+}

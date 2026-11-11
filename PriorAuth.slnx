@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PriorAuth.Api/PriorAuth.Api.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PriorAuth.Api.Tests/PriorAuth.Api.Tests.csproj" />
+  </Folder>
+  <Folder Name="/prototype/">
+    <Project Path="prototype/PriorAuth.Prototype/PriorAuth.Prototype.csproj" />
+  </Folder>
+</Solution>
