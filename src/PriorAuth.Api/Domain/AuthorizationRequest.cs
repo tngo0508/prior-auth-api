@@ -26,6 +26,8 @@ public class AuthorizationRequest
     private AuthorizationRequest() { } // for Entity Framework
 
     public string Id { get; private set; } = "";
+    /// <summary>The registered provider system that sent the request. Only it may see the answer.</summary>
+    public string ClientId { get; private set; } = "";
     /// <summary>The identifier the provider put on its request (FHIR Claim.identifier).</summary>
     public string ProviderRequestId { get; private set; } = "";
     public string ProviderName { get; private set; } = "";
@@ -47,13 +49,14 @@ public class AuthorizationRequest
     public bool IsOpen => Status is AuthorizationStatus.Pended or AuthorizationStatus.InformationRequested;
 
     public static AuthorizationRequest Receive(
-        string providerRequestId, string providerName, string memberName,
+        string clientId, string providerRequestId, string providerName, string memberName,
         string serviceCode, string serviceName, bool authorizationRequired,
         string submittedBundleJson, DateTime nowUtc)
     {
         var request = new AuthorizationRequest
         {
             Id = Guid.NewGuid().ToString("N"),
+            ClientId = clientId,
             ProviderRequestId = providerRequestId,
             ProviderName = providerName,
             MemberName = memberName,

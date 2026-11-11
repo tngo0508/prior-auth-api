@@ -5,6 +5,9 @@
   <Folder Name="/tests/">
     <Project Path="tests/PriorAuth.Api.Tests/PriorAuth.Api.Tests.csproj" />
   </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/PriorAuth.SampleClient/PriorAuth.SampleClient.csproj" />
+  </Folder>
   <Folder Name="/prototype/">
     <Project Path="prototype/PriorAuth.Prototype/PriorAuth.Prototype.csproj" />
   </Folder>

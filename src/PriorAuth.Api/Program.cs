@@ -1,11 +1,12 @@
 using Microsoft.EntityFrameworkCore;
+using PriorAuth.Api.Auth;
 using PriorAuth.Api.Data;
 using PriorAuth.Api.Domain;
 using PriorAuth.Api.Fhir;
 using PriorAuth.Api.Review;
 
-// NOT READY TO DEPLOY: there is no authentication yet (GitHub issue #6).
-// Run it locally with synthetic data only.
+// NOT READY TO DEPLOY. Provider systems must sign in, but agency staff sign-in does not exist yet:
+// the internal endpoints only answer callers on the same machine. Use synthetic data only.
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -17,6 +18,7 @@ builder.Services.AddSingleton<FhirJson>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(services => new ServiceRequirementCatalog(
     services.GetRequiredService<IConfiguration>().GetSection("ServiceRequirements").Get<ServiceRequirement[]>() ?? []));
+builder.Services.AddProviderSignIn();
 
 var app = builder.Build();
 
@@ -28,8 +30,13 @@ using (var scope = app.Services.CreateScope())
 
 app.UseDefaultFiles();
 app.UseStaticFiles();
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.MapTokenEndpoint();
 app.MapFhirEndpoints();
 app.MapReviewerEndpoints();
+app.MapClientRegistrationEndpoints();
 
 app.Run();
 

@@ -22,11 +22,15 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
     }
 }
 
-public class PriorAuthApiTests : IClassFixture<ApiFactory>
+public class PriorAuthApiTests(ApiFactory factory) : IClassFixture<ApiFactory>, IAsyncLifetime
 {
-    private readonly HttpClient _client;
+    // A signed-in provider system. Each test gets its own, so tests cannot see each other's requests.
+    private HttpClient _client = null!;
 
-    public PriorAuthApiTests(ApiFactory factory) => _client = factory.CreateClient();
+    public async Task InitializeAsync() =>
+        _client = await (await TestProvider.RegisterAsync(factory.CreateClient())).SignInAsync(factory);
+
+    public Task DisposeAsync() => Task.CompletedTask;
 
     // ---------- Requirements list ----------
 

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using PriorAuth.Api.Auth;
 using PriorAuth.Api.Data;
 using PriorAuth.Api.Domain;
 
@@ -16,7 +17,7 @@ public static class ReviewerEndpoints
 {
     public static void MapReviewerEndpoints(this WebApplication app)
     {
-        var group = app.MapGroup("/internal/requests");
+        var group = app.MapGroup("/internal/requests").LocalCallersOnly();
 
         group.MapGet("", async (PriorAuthDb db) =>
         {

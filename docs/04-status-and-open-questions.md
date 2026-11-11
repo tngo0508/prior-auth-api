@@ -5,15 +5,17 @@ Last updated 2026-11-11.
 ## What exists
 
 - A learning prototype you can drive from one page.
-- A service with a database, the request rules, the provider endpoints, a reviewer screen, and 17 passing automated tests.
+- A service with a database, the request rules, the provider endpoints, a reviewer screen, and 37 passing automated tests.
+- Sign-in for provider systems (SMART Backend Services), with each provider limited to its own requests.
+- A sample provider client.
 - This documentation.
 
 ## What does not exist yet
 
 | Gap | Why it matters | Issue |
 |---|---|---|
-| No sign-in for provider systems | Anyone who can reach the server can submit and read requests. The service must not be exposed or given real data until this is done. | [#6](https://github.com/tngo0508/prior-auth-api/issues/6) |
-| No sign-in for reviewers | The reviewer's name is typed in, not verified. | [#2](https://github.com/tngo0508/prior-auth-api/issues/2) |
+| Single instance only | The token signing key and the memory of used sign-in assertions live in one process. | [#14](https://github.com/tngo0508/prior-auth-api/issues/14) |
+| No sign-in for agency staff | The reviewer's name is typed in, not verified. As a stopgap, the internal endpoints only answer callers on the server's own machine. The service must not hold real data until this is done. | [#2](https://github.com/tngo0508/prior-auth-api/issues/2) |
 | Placeholder service list | The four services and their paperwork are invented examples. | [#1](https://github.com/tngo0508/prior-auth-api/issues/1) |
 | FHIR output not validated | The response shape follows a reading of PAS 2.0.1 and has not been run through a validator or the Inferno test kit. | [#8](https://github.com/tngo0508/prior-auth-api/issues/8) |
 | Attachments | A provider cannot yet send the supporting documents with the request. | [#12](https://github.com/tngo0508/prior-auth-api/issues/12) |
@@ -40,4 +42,4 @@ These were assumed so that building could continue. Each could change the design
 3. **SQLite locally, SQL Server in production**, hosted wherever the agency runs internet-facing .NET applications ([#4](https://github.com/tngo0508/prior-auth-api/issues/4)).
 4. **The service list will come from utilization management staff**, signed off, and not be derived by the developer ([#1](https://github.com/tngo0508/prior-auth-api/issues/1)).
 
-Previous: [3. Running and testing](03-running-and-testing.md)
+Previous: [3. Running and testing](03-running-and-testing.md) · Next: [5. Sign-in for provider systems](05-sign-in.md)

@@ -87,7 +87,7 @@ public static class PasMapper
                 AuthorizationStatus.NotRequired => "Prior authorization is not required for this service.",
                 _ => "Pended for clinical review.",
             },
-            PreAuthRef = request.AuthorizationNumber,
+            PreAuthRef = request.AuthorizationNumber!,
             PreAuthPeriod = request.AuthorizedThrough is { } through ? new Period { End = through.ToString("yyyy-MM-dd") } : null!,
             Item = [new ClaimResponse.ItemComponent { ItemSequence = 1, Adjudication = [adjudication] }],
         };

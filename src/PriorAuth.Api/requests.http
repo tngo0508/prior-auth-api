@@ -1,25 +1,18 @@
-# Run the service, then send these in order. Synthetic data only.
+# Calls that need no access token. Submitting and inquiring need one:
+# use samples/PriorAuth.SampleClient for those. Synthetic data only.
 @host = http://localhost:5020
 
 ### What the server supports
 GET {{host}}/fhir/metadata
 
+### Where and how a provider system signs in
+GET {{host}}/fhir/.well-known/smart-configuration
+
 ### Which services need authorization, and their paperwork
 GET {{host}}/requirements
 
-### Submit a request. Expect outcome "queued" and review action A4 (Pended).
-POST {{host}}/fhir/Claim/$submit
-Content-Type: application/fhir+json
-
-< ../../prototype/PriorAuth.Prototype/sample-pas-request.json
-
-### Now open {{host}}/ in a browser and decide the request.
-
-### Ask for the current state. Expect the reviewer's decision.
-POST {{host}}/fhir/Claim/$inquire
-Content-Type: application/fhir+json
-
-< ../../prototype/PriorAuth.Prototype/sample-pas-request.json
-
-### The reviewer queue as JSON
+### The reviewer queue as JSON (same machine only)
 GET {{host}}/internal/requests
+
+### Registered provider systems (same machine only)
+GET {{host}}/internal/clients

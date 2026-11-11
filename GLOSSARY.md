@@ -12,6 +12,10 @@ _Avoid_: Payer, insurer, the county, the agency
 A contracted organization that delivers services to members and asks the Behavioral Health Plan for authorization.
 _Avoid_: Client, vendor, submitter
 
+**Provider System**:
+A Provider's software that the Behavioral Health Plan has registered to send Authorization Requests on the Provider's behalf. It can see only the requests it sent.
+_Avoid_: Client app, EHR, integration, API user
+
 **Authorization Request**:
 A Provider's request for approval of one service for one member over a period.
 _Avoid_: Claim, TAR, ticket, case

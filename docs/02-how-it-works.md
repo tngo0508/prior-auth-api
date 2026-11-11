@@ -50,6 +50,7 @@ Rules the code enforces, in [AuthorizationRequest.cs](../src/PriorAuth.Api/Domai
 - An information request must say what is missing.
 - Every action must name the reviewer, and every action is written to the request's history.
 - A provider that sends the same request identifier twice gets the same answer, not a second request.
+- A provider system must sign in, and can only see requests it sent itself.
 
 ## The parts of the system
 
@@ -92,6 +93,7 @@ flowchart TB
 | [Fhir/FhirEndpoints.cs](../src/PriorAuth.Api/Fhir/FhirEndpoints.cs) | The URLs a provider's EHR calls. |
 | [Review/ReviewerEndpoints.cs](../src/PriorAuth.Api/Review/ReviewerEndpoints.cs) | The URLs the reviewer screen calls. |
 | [Data/PriorAuthDb.cs](../src/PriorAuth.Api/Data/PriorAuthDb.cs) | The database mapping. |
+| [Auth/](../src/PriorAuth.Api/Auth) | Sign-in for provider systems. See [5. Sign-in](05-sign-in.md). |
 | [service-requirements.json](../src/PriorAuth.Api/service-requirements.json) | The list of services needing approval. Placeholder content today. |
 | [wwwroot/index.html](../src/PriorAuth.Api/wwwroot/index.html) | The reviewer screen. |
 
@@ -99,10 +101,19 @@ flowchart TB
 
 ```mermaid
 erDiagram
+    ProviderClient ||--o{ AuthorizationRequest : submits
     AuthorizationRequest ||--o{ HistoryEntry : has
+    ProviderClient {
+        string ClientId PK
+        string Name
+        string JwksJson
+        bool Active
+        datetime RegisteredAtUtc
+    }
     AuthorizationRequest {
         string Id PK
-        string ProviderRequestId UK
+        string ClientId FK
+        string ProviderRequestId
         string ProviderName
         string MemberName
         string ServiceCode
@@ -138,7 +149,7 @@ The screen is a single page served by the same app. It lists requests newest fir
 | Incoming FHIR | Stored as |
 |---|---|
 | `Claim.identifier[0].value` | `ProviderRequestId` |
-| `Claim.provider.display` | `ProviderName` |
+| The signed-in client's registered name | `ProviderName` |
 | `Patient.name[0]` in the same Bundle | `MemberName` |
 | `Claim.item[0].productOrService.coding[0].code` | `ServiceCode` |
 
