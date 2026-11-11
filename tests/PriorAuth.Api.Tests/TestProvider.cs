@@ -11,7 +11,7 @@ namespace PriorAuth.Api.Tests;
 public sealed class TestProvider
 {
     public const string TokenUrl = "http://localhost/auth/token";
-    public const string AllScopes = "system/Claim.write system/ClaimResponse.read";
+    public const string AllScopes = "system/Claim.write system/ClaimResponse.read system/Questionnaire.read";
 
     private readonly RSA _key = RSA.Create(2048);
     private readonly string _keyId = Guid.NewGuid().ToString("N");

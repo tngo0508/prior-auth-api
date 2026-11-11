@@ -34,7 +34,7 @@
 Content-Type: application/x-www-form-urlencoded
 
 grant_type=client_credentials
-&amp;scope=system/Claim.write system/ClaimResponse.read
+&amp;scope=system/Claim.write system/ClaimResponse.read system/Questionnaire.read
 &amp;client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer
 &amp;client_assertion=&lt;signed JWT&gt;</code></pre>
 <p>The assertion is a JWT signed with RS384 or ES384 whose claims are:</p>
@@ -50,12 +50,23 @@ grant_type=client_credentials
 <h2>3. Check what needs authorization</h2>
 <p><a href="/requirements"><code>GET /requirements</code></a> lists every service that needs prior authorization and the documentation required for each. <code>GET /requirements?code=H2019</code> answers for one service; an empty list means no authorization is needed. No token is required.</p>
 
+<h2>Ask from inside the EHR: CRD and DTR</h2>
+<p>If your system supports the Da Vinci CRD and DTR guides, it can get the same information in standard form.</p>
+<div class="wrap"><table>
+<tr><th>Address</th><th>Purpose</th><th>Authentication</th></tr>
+<tr><td><a href="/cds-services"><code>GET /cds-services</code></a></td><td>CDS Hooks discovery</td><td>None</td></tr>
+<tr><td><code>POST /cds-services/prior-auth-order-sign</code><br><code>POST /cds-services/prior-auth-order-select</code></td><td>Send <code>context.draftOrders</code>. Each <code>ServiceRequest</code> comes back in <code>systemActions</code> with the CRD coverage information extension: <code>pa-needed</code> is <code>auth-needed</code> or <code>no-auth</code>, and <code>questionnaire</code> names the questionnaire to complete. Name the member's coverage in <code>ServiceRequest.insurance</code> or send it in <code>prefetch.coverage</code>.</td><td>CDS Hooks JWT: signed with your registered key, <code>iss</code> your <code>client_id</code>, <code>aud</code> the service URL, a fresh <code>jti</code>, <code>exp</code> within five minutes</td></tr>
+<tr><td><code>POST /fhir/Questionnaire/$questionnaire-package</code></td><td>Send a <code>Parameters</code> resource with a <code>questionnaire</code> canonical or an <code>order</code>. The answer has one <code>PackageBundle</code> per questionnaire: the <code>Questionnaire</code> first, then a draft <code>QuestionnaireResponse</code>.</td><td>Access token with <code>system/Questionnaire.read</code></td></tr>
+</table></div>
+<p>Include the completed <code>QuestionnaireResponse</code> in the Bundle you submit in the next step. This service does not check member eligibility; <code>covered</code> is <code>conditional</code> for any service not on the plan's list.</p>
+
 <h2>4. Submit a request</h2>
 <p><code>POST /fhir/Claim/$submit</code> with <code>Content-Type: application/fhir+json</code>. The body is a FHIR <code>Bundle</code> of type <code>collection</code> containing:</p>
 <div class="wrap"><table>
 <tr><th>Resource</th><th>What we read</th></tr>
 <tr><td><code>Claim</code> (required)</td><td><code>use</code> must be <code>preauthorization</code>. <code>identifier[0].value</code> is your request number. <code>insurer</code> is required. <code>item[0].productOrService.coding[0].code</code> is the service code. All elements FHIR itself requires must be present.</td></tr>
 <tr><td><code>Patient</code></td><td>The member's name.</td></tr>
+<tr><td><code>QuestionnaireResponse</code> (zero or more)</td><td>Answers to the plan's questionnaire for the service. The reviewer sees each question with its answer.</td></tr>
 <tr><td><code>DocumentReference</code> (zero or more)</td><td>Supporting documents, sent inline in <code>content.attachment.data</code>. Accepted types: PDF, JPEG, PNG, TIFF, plain text. Up to 5 MB each and 10 per submission. Links are not accepted.</td></tr>
 </table></div>
 <p>The answer is a <code>Bundle</code> whose first entry is a <code>ClaimResponse</code>. Read the decision from the review action code in <code>item[0].adjudication[0].extension</code>:</p>

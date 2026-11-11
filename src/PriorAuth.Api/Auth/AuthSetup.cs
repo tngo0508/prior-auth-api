@@ -12,6 +12,7 @@ public static class AuthSetup
     {
         services.AddMemoryCache();
         services.AddSingleton<AccessTokenIssuer>();
+        services.AddScoped<ClientAssertions>();
 
         services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer();
         services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme).Configure<AccessTokenIssuer>((options, issuer) =>
@@ -27,9 +28,9 @@ public static class AuthSetup
             };
         });
 
-        services.AddAuthorizationBuilder()
-            .AddPolicy(Scopes.SubmitRequests, policy => policy.RequireAuthenticatedUser().RequireAssertion(context => HasScope(context.User, Scopes.SubmitRequests)))
-            .AddPolicy(Scopes.ReadResponses, policy => policy.RequireAuthenticatedUser().RequireAssertion(context => HasScope(context.User, Scopes.ReadResponses)));
+        var authorization = services.AddAuthorizationBuilder();
+        foreach (var scope in Scopes.All)
+            authorization.AddPolicy(scope, policy => policy.RequireAuthenticatedUser().RequireAssertion(context => HasScope(context.User, scope)));
 
         return services;
     }

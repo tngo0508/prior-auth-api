@@ -5,11 +5,12 @@ Last updated 2026-11-11.
 ## What exists
 
 - A learning prototype you can drive from one page.
-- A service with a database, the request rules, the provider endpoints, a reviewer screen, and 48 automated tests that pass on both SQLite and SQL Server.
+- A service with a database, the request rules, the provider endpoints, a reviewer screen, and 65 automated tests that pass on both SQLite and SQL Server.
 - Sign-in for provider systems (SMART Backend Services), with each provider limited to its own requests.
 - A sample provider client.
 - Supporting documents: sent with a request, shown to the reviewer, and used to answer an information request.
 - SQL Server support with migrations.
+- CRD (CDS Hooks for order-sign and order-select) and DTR (a questionnaire per service), in basic form, with answers flowing to the reviewer.
 - A developer guide for provider systems, served by the app at `/developers.html`.
 - This documentation.
 
@@ -19,10 +20,10 @@ Last updated 2026-11-11.
 |---|---|---|
 | Single instance only | The token signing key and the memory of used sign-in assertions live in one process. | [#14](https://github.com/tngo0508/prior-auth-api/issues/14) |
 | No sign-in for agency staff | The reviewer's name is typed in, not verified. As a stopgap, the internal endpoints only answer callers on the server's own machine. The service must not hold real data until this is done. | [#2](https://github.com/tngo0508/prior-auth-api/issues/2) |
-| Placeholder service list | The four services and their paperwork are invented examples. | [#1](https://github.com/tngo0508/prior-auth-api/issues/1) |
+| Placeholder service list | The four services, their paperwork and their questions are invented examples. | [#1](https://github.com/tngo0508/prior-auth-api/issues/1) |
 | FHIR output not machine-validated | The response shape was compared by reading against the published PAS 2.0.1 definitions, but has not been run through a validator or the Inferno test kit. Known gaps are listed in [How it works](02-how-it-works.md). | [#8](https://github.com/tngo0508/prior-auth-api/issues/8) |
 | Documents are not scanned | Files from providers are restricted by type and size and always served as downloads, but are not virus-scanned. | [#15](https://github.com/tngo0508/prior-auth-api/issues/15) |
-| Simple requirements list | Questions 1 and 2 are a plain list, not the CRD and DTR standards. | [#7](https://github.com/tngo0508/prior-auth-api/issues/7), [#10](https://github.com/tngo0508/prior-auth-api/issues/10) |
+| CRD and DTR are basic | No automatic filling of answers (CQL), two of six hooks, no eligibility check. The full list is in [CRD and DTR](06-crd-and-dtr.md). | [#16](https://github.com/tngo0508/prior-auth-api/issues/16) |
 | No hosted environment | Nothing is deployed. Hosting, TLS, backups and monitoring are undecided. | [#4](https://github.com/tngo0508/prior-auth-api/issues/4) |
 | Public sandbox | BHIN 26-008 requires public documentation; the developer guide exists but is only served locally, and there is no sandbox. | [#9](https://github.com/tngo0508/prior-auth-api/issues/9) |
 
@@ -45,4 +46,4 @@ These were assumed so that building could continue. Each could change the design
 3. **SQLite locally, SQL Server in production**, hosted wherever the agency runs internet-facing .NET applications ([#4](https://github.com/tngo0508/prior-auth-api/issues/4)).
 4. **The service list will come from utilization management staff**, signed off, and not be derived by the developer ([#1](https://github.com/tngo0508/prior-auth-api/issues/1)).
 
-Previous: [3. Running and testing](03-running-and-testing.md) · Next: [5. Sign-in for provider systems](05-sign-in.md)
+Previous: [3. Running and testing](03-running-and-testing.md) · Next: [5. Sign-in for provider systems](05-sign-in.md), [6. Asking first: CRD and DTR](06-crd-and-dtr.md)

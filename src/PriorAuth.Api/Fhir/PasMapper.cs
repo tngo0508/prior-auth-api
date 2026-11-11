@@ -17,7 +17,7 @@ public static class PasMapper
     public const string ReviewActionCodeUrl = "http://hl7.org/fhir/us/davinci-pas/StructureDefinition/extension-reviewActionCode";
     public const string ReviewActionCodeSystem = "https://codesystem.x12.org/005010/306";
 
-    public static (Submission? Submission, string? Error) ReadSubmission(Bundle bundle)
+    public static (Submission? Submission, string? Error) ReadSubmission(Bundle bundle, ServiceRequirementCatalog catalog)
     {
         var claim = FindClaim(bundle);
         if (claim is null) return (null, "The Bundle must contain a Claim.");
@@ -36,14 +36,14 @@ public static class PasMapper
         var memberName = patient?.Name.FirstOrDefault()?.ToString() ?? claim.Patient?.Display ?? "(not stated)";
         var providerName = claim.Provider?.Display ?? claim.Provider?.Reference ?? "(not stated)";
 
-        var (documents, documentError) = ReadDocuments(bundle);
+        var (documents, documentError) = ReadDocuments(bundle, catalog);
         if (documentError is not null) return (null, documentError);
 
         return (new Submission(claim, requestId, providerName, memberName, coding.Code, coding.Display, documents), null);
     }
 
     /// <summary>Supporting paperwork arrives as DocumentReference resources with the file inline.</summary>
-    private static (IReadOnlyList<NewDocument> Documents, string? Error) ReadDocuments(Bundle bundle)
+    private static (IReadOnlyList<NewDocument> Documents, string? Error) ReadDocuments(Bundle bundle, ServiceRequirementCatalog catalog)
     {
         var documents = new List<NewDocument>();
         foreach (var reference in bundle.Entry.Select(e => e.Resource).OfType<DocumentReference>())
@@ -60,9 +60,44 @@ public static class PasMapper
                 documents.Add(new NewDocument(title, attachment.ContentType!.ToLowerInvariant(), attachment.Data));
             }
         }
+        // A completed questionnaire (Da Vinci DTR) is stored as a readable text document for the reviewer.
+        foreach (var response in bundle.Entry.Select(e => e.Resource).OfType<QuestionnaireResponse>())
+        {
+            var questionnaireId = (response.Questionnaire ?? "").Split('|')[0].TrimEnd('/').Split('/').Last();
+            var requirement = catalog.FindByQuestionnaireId(questionnaireId);
+            var lines = new List<string>();
+            WriteAnswers(response.Item, requirement, lines, indent: "");
+            if (lines.Count == 0) continue;
+
+            var title = $"Questionnaire answers: {requirement?.Name ?? questionnaireId}";
+            var text = title + Environment.NewLine + Environment.NewLine + string.Join(Environment.NewLine, lines);
+            documents.Add(new NewDocument(title, "text/plain", System.Text.Encoding.UTF8.GetBytes(text)));
+        }
+
         return documents.Count > SupportingDocument.MaxPerSubmission
             ? ([], $"At most {SupportingDocument.MaxPerSubmission} documents can be sent at once.")
             : (documents, null);
+    }
+
+    private static void WriteAnswers(List<QuestionnaireResponse.ItemComponent> items, ServiceRequirement? requirement, List<string> lines, string indent)
+    {
+        foreach (var item in items)
+        {
+            var question = requirement?.Questions.FirstOrDefault(q => q.LinkId == item.LinkId)?.Text ?? item.Text ?? item.LinkId;
+            var answers = item.Answer.Select(a => a.Value switch
+            {
+                FhirBoolean { Value: true } => "Yes",
+                FhirBoolean { Value: false } => "No",
+                Coding coding => coding.Display ?? coding.Code,
+                PrimitiveType primitive => primitive.ObjectValue?.ToString(),
+                _ => a.Value?.ToString(),
+            }).Where(a => !string.IsNullOrWhiteSpace(a)).ToList();
+
+            if (answers.Count > 0 || item.Item.Count > 0)
+                lines.Add($"{indent}{question}: {(answers.Count > 0 ? string.Join("; ", answers) : "")}".TrimEnd());
+            WriteAnswers(item.Item, requirement, lines, indent + "  ");
+            foreach (var answer in item.Answer) WriteAnswers(answer.Item, requirement, lines, indent + "  ");
+        }
     }
 
     public static Claim? FindClaim(Bundle bundle) => bundle.Entry.Select(e => e.Resource).OfType<Claim>().FirstOrDefault();

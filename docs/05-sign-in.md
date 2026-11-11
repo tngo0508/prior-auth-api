@@ -57,6 +57,7 @@ Failures return `401` with `"error": "invalid_client"`.
 |---|---|
 | `system/Claim.write` | Submit a request and inquire about it |
 | `system/ClaimResponse.read` | Read a response by its id |
+| `system/Questionnaire.read` | Download questionnaires |
 
 A provider only ever sees its own requests. If Clinic B asks about Clinic A's request, the answer is "not found", the same as for a request that does not exist. Two providers may use the same request number without colliding.
 
@@ -109,4 +110,4 @@ Where the code is:
 | [Auth/ClientRegistrationEndpoints.cs](../src/PriorAuth.Api/Auth/ClientRegistrationEndpoints.cs) | Registering and deactivating provider systems |
 | [Auth/ProviderClient.cs](../src/PriorAuth.Api/Auth/ProviderClient.cs) | The stored record of a registered system |
 
-Previous: [4. Status and open questions](04-status-and-open-questions.md)
+Previous: [4. Status and open questions](04-status-and-open-questions.md) · Next: [6. Asking first: CRD and DTR](06-crd-and-dtr.md)

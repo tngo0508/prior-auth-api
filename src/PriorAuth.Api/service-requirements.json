@@ -1,29 +1,53 @@
 {
-  "_comment": "PLACEHOLDER DATA. The real list and documentation rules must be supplied and signed off by the plan's utilization management staff (GitHub issue #1).",
+  "_comment": "PLACEHOLDER DATA. The real list, documentation rules and questions must be supplied and signed off by the plan's utilization management staff (GitHub issue #1).",
   "ServiceRequirements": [
     {
       "Code": "H2019",
       "Name": "Therapeutic Behavioral Services",
       "Program": "SMHS",
-      "Documentation": [ "Current assessment", "Client plan showing TBS need", "Target behaviours and transition plan" ]
+      "Documentation": [ "Current assessment", "Client plan showing TBS need", "Target behaviours and transition plan" ],
+      "Questions": [
+        { "LinkId": "assessment-date", "Text": "Date of the most recent assessment", "Type": "date", "Required": true },
+        { "LinkId": "target-behaviours", "Text": "Target behaviours TBS will address", "Type": "text", "Required": true },
+        { "LinkId": "placement-risk", "Text": "Is the member at risk of a higher level of placement without TBS?", "Type": "boolean", "Required": true },
+        { "LinkId": "hours-per-week", "Text": "Requested hours per week", "Type": "choice", "Required": true, "Options": [ "Up to 10", "11 to 20", "More than 20" ] },
+        { "LinkId": "transition-plan", "Text": "Transition plan", "Type": "text", "Required": false }
+      ]
     },
     {
       "Code": "H2012",
       "Name": "Day Treatment Intensive / Day Rehabilitation",
       "Program": "SMHS",
-      "Documentation": [ "Current assessment", "Proposed schedule and hours per day", "Reason a lower level of care is insufficient" ]
+      "Documentation": [ "Current assessment", "Proposed schedule and hours per day", "Reason a lower level of care is insufficient" ],
+      "Questions": [
+        { "LinkId": "assessment-date", "Text": "Date of the most recent assessment", "Type": "date", "Required": true },
+        { "LinkId": "program-type", "Text": "Program requested", "Type": "choice", "Required": true, "Options": [ "Day Treatment Intensive", "Day Rehabilitation" ] },
+        { "LinkId": "hours-per-day", "Text": "Hours per day", "Type": "choice", "Required": true, "Options": [ "Half day", "Full day" ] },
+        { "LinkId": "lower-level-insufficient", "Text": "Why a lower level of care is insufficient", "Type": "text", "Required": true }
+      ]
     },
     {
       "Code": "S5145",
       "Name": "Therapeutic Foster Care",
       "Program": "SMHS",
-      "Documentation": [ "Child and Family Team recommendation", "Current assessment" ]
+      "Documentation": [ "Child and Family Team recommendation", "Current assessment" ],
+      "Questions": [
+        { "LinkId": "cft-recommended", "Text": "Has the Child and Family Team recommended Therapeutic Foster Care?", "Type": "boolean", "Required": true },
+        { "LinkId": "cft-date", "Text": "Date of the Child and Family Team meeting", "Type": "date", "Required": true },
+        { "LinkId": "needs-summary", "Text": "Summary of the child's needs", "Type": "text", "Required": true }
+      ]
     },
     {
       "Code": "H0019",
       "Name": "Residential Treatment",
       "Program": "DMC-ODS",
-      "Documentation": [ "ASAM level of care assessment", "Diagnosis", "Requested length of stay" ]
+      "Documentation": [ "ASAM level of care assessment", "Diagnosis", "Requested length of stay" ],
+      "Questions": [
+        { "LinkId": "asam-level", "Text": "ASAM level of care indicated", "Type": "choice", "Required": true, "Options": [ "3.1", "3.3", "3.5" ] },
+        { "LinkId": "asam-date", "Text": "Date of the ASAM assessment", "Type": "date", "Required": true },
+        { "LinkId": "diagnosis", "Text": "Primary diagnosis", "Type": "string", "Required": true },
+        { "LinkId": "length-of-stay", "Text": "Requested length of stay in days", "Type": "string", "Required": true }
+      ]
     }
   ]
 }

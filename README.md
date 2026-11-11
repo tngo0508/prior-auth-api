@@ -17,6 +17,7 @@ Read these in order:
 3. [Running and testing](docs/03-running-and-testing.md): how to run the prototype and the service, the endpoints, and the tests.
 4. [Status and open questions](docs/04-status-and-open-questions.md): what is done, what is missing, and the assumptions still to confirm.
 5. [Sign-in for provider systems](docs/05-sign-in.md): how a provider's system proves who it is, with a diagram.
+6. [Asking first: CRD and DTR](docs/06-crd-and-dtr.md): how an EHR finds out that authorization is needed and what to send, with a diagram.
 
 [GLOSSARY.md](GLOSSARY.md) defines the project's business terms.
 

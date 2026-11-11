@@ -1,7 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using PriorAuth.Api.Auth;
+using PriorAuth.Api.Crd;
 using PriorAuth.Api.Data;
 using PriorAuth.Api.Domain;
+using PriorAuth.Api.Dtr;
 using PriorAuth.Api.Fhir;
 using PriorAuth.Api.Review;
 
@@ -46,6 +48,8 @@ app.UseAuthorization();
 
 app.MapTokenEndpoint();
 app.MapFhirEndpoints();
+app.MapCrdEndpoints();
+app.MapDtrEndpoints();
 app.MapReviewerEndpoints();
 app.MapClientRegistrationEndpoints();
 

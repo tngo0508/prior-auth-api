@@ -29,7 +29,7 @@ public static class FhirEndpoints
             var (bundle, parseError) = fhir.ReadBundle(json);
             if (parseError is not null) return fhir.Problem(parseError);
 
-            var (submission, error) = PasMapper.ReadSubmission(bundle!);
+            var (submission, error) = PasMapper.ReadSubmission(bundle!, catalog);
             if (error is not null) return fhir.Problem(error);
 
             var now = clock.GetUtcNow();

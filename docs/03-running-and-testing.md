@@ -33,7 +33,7 @@ Open http://localhost:5020 for the reviewer queue. Provider systems must sign in
 dotnet run --project samples/PriorAuth.SampleClient -- http://localhost:5020
 ```
 
-It registers, signs in, submits a request and waits for you to decide it in the queue. [5. Sign-in](05-sign-in.md) explains what it is doing. [requests.http](../src/PriorAuth.Api/requests.http) holds the calls that need no token.
+It registers, asks whether an order needs authorization, signs in, downloads the questionnaire, submits a request with answers and a document, and waits for you to decide it in the queue. [5. Sign-in](05-sign-in.md) and [6. CRD and DTR](06-crd-and-dtr.md) explain what it is doing. [requests.http](../src/PriorAuth.Api/requests.http) holds the calls that need no token.
 
 To start with an empty database, stop the app and delete `src/PriorAuth.Api/priorauth.db`. Do this too after pulling changes that alter the data model: the local SQLite file is created once and is not upgraded.
 
@@ -62,6 +62,10 @@ dotnet ef migrations add NameOfTheChange --project src/PriorAuth.Api -o Data/Mig
 | `GET /fhir/metadata` | What the server supports | `CapabilityStatement` |
 | `GET /fhir/.well-known/smart-configuration` | Where and how to sign in | JSON |
 | `POST /auth/token` | Sign in with a signed assertion | Access token, valid 300 seconds |
+| `GET /cds-services` | CRD: lists the CDS Hooks services | JSON |
+| `POST /cds-services/prior-auth-order-sign` | CRD: is approval needed for these draft orders? | Orders marked with coverage information |
+| `POST /fhir/Questionnaire/$questionnaire-package` | DTR: the questionnaire for a service | `Parameters` holding package Bundles |
+| `GET /fhir/Questionnaire/{id}` | DTR: one questionnaire | `Questionnaire` |
 | `GET /requirements` | All services needing approval | JSON list |
 | `GET /requirements?code=H2019` | One service and its paperwork | JSON list, empty if no approval is needed |
 | `POST /fhir/Claim/$submit` | Send an authorization request | `Bundle` holding a `ClaimResponse` |
@@ -93,7 +97,7 @@ A broken rule returns status 422 with the reason in `detail`.
 dotnet test
 ```
 
-The tests start the real application against a temporary database and call it over HTTP, signing in the way a provider system would. There are 48, in [PriorAuthApiTests.cs](../tests/PriorAuth.Api.Tests/PriorAuthApiTests.cs), [SignInTests.cs](../tests/PriorAuth.Api.Tests/SignInTests.cs) and [SupportingDocumentTests.cs](../tests/PriorAuth.Api.Tests/SupportingDocumentTests.cs). Each test name is a sentence stating a behaviour:
+The tests start the real application against a temporary database and call it over HTTP, signing in the way a provider system would. There are 65, in [PriorAuthApiTests.cs](../tests/PriorAuth.Api.Tests/PriorAuthApiTests.cs), [SignInTests.cs](../tests/PriorAuth.Api.Tests/SignInTests.cs), [SupportingDocumentTests.cs](../tests/PriorAuth.Api.Tests/SupportingDocumentTests.cs) and [CrdAndDtrTests.cs](../tests/PriorAuth.Api.Tests/CrdAndDtrTests.cs). Each test name is a sentence stating a behaviour:
 
 | Area | Behaviours covered |
 |---|---|
@@ -103,6 +107,8 @@ The tests start the real application against a temporary database and call it ov
 | Reading | A response can be read by id; an unknown request returns 404; the capability statement advertises submit and inquire. |
 | Getting a token | A valid assertion gets a 300-second token; refused when signed with another key, from an unregistered or deactivated client, addressed to another server, expired, too long-lived, reused, or asking for no supported scope. |
 | Registering | A key set containing a private key is refused. |
+| CRD | Discovery lists the services; a listed service is marked as needing authorization with its questionnaire; an unlisted one needs none and no coverage is claimed; prefetched coverage is used; no coverage gives a warning card; unsigned, wrong-audience, wrong-hook and non-JSON calls are refused. |
+| DTR | A package starts with the questionnaire and includes a draft response; it can be chosen from the order; nothing applicable gives 404; questionnaires need a token and the right scope; answers sent with a request reach the reviewer as readable text. |
 | Supporting documents | A document reaches the reviewer unchanged and is served as a download; unaccepted types, oversized files and links are refused; sending the missing document answers an information request; resending at other times changes nothing. |
 | Using the API | No token gives 401; the descriptive endpoints need none; a token without the read scope cannot read; a provider cannot see another provider's request; two providers can use the same request number; the registered name is recorded, not the claimed one. |
 

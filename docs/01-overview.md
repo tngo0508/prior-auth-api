@@ -41,8 +41,8 @@ The API does not change who decides. A clinician at the agency reviews every req
 
 | Question | Standard | In this project today |
 |---|---|---|
-| 1. Is approval needed? | Da Vinci CRD (Coverage Requirements Discovery) | A simple list at `GET /requirements` |
-| 2. What documents? | Da Vinci DTR (Documentation Templates and Rules) | The `documentation` field in the same list |
+| 1. Is approval needed? | Da Vinci CRD (Coverage Requirements Discovery) | CDS Hooks services at `/cds-services`, and a simple list at `GET /requirements` |
+| 2. What documents? | Da Vinci DTR (Documentation Templates and Rules) | A questionnaire per service at `POST /fhir/Questionnaire/$questionnaire-package` |
 | 3. Request and answer | Da Vinci PAS (Prior Authorization Support) | `POST /fhir/Claim/$submit` and `POST /fhir/Claim/$inquire` |
 
 All three sit on **FHIR R4**, the healthcare data format. In C# the [Firely SDK](https://github.com/FirelyTeam/firely-net-sdk) reads and writes it.
@@ -64,5 +64,7 @@ The rule requires the three functions and FHIR. The Da Vinci guides are the reco
 | Review action code `NA` | No action required; the service needs no approval. |
 
 The project's own business terms are in [GLOSSARY.md](../GLOSSARY.md).
+
+[6. Asking first: CRD and DTR](06-crd-and-dtr.md) explains how the three standards work together.
 
 Next: [2. How it works](02-how-it-works.md)

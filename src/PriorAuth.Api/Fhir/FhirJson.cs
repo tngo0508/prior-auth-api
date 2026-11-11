@@ -13,16 +13,20 @@ public class FhirJson
     public string Write(Resource resource) => JsonSerializer.Serialize(resource, resource.GetType(), _options);
 
     /// <summary>Parses a Bundle. Returns an error message when the JSON is not valid FHIR.</summary>
-    public (Bundle? Bundle, string? Error) ReadBundle(string json)
+    public (Bundle? Bundle, string? Error) ReadBundle(string json) => Read<Bundle>(json);
+
+    /// <summary>Parses one FHIR resource of a known type. Returns an error message when the JSON is not valid FHIR.</summary>
+    public (T? Resource, string? Error) Read<T>(string json) where T : Resource
     {
+        var name = typeof(T).Name;
         try
         {
-            var bundle = JsonSerializer.Deserialize<Bundle>(json, _options);
-            return bundle is null ? (null, "The request body must be a FHIR Bundle.") : (bundle, null);
+            var resource = JsonSerializer.Deserialize<T>(json, _options);
+            return resource is null ? (null, $"The request body must be a FHIR {name}.") : (resource, null);
         }
         catch (Exception ex) when (ex is DeserializationFailedException or JsonException)
         {
-            return (null, $"The request body is not a valid FHIR Bundle: {ex.Message}");
+            return (null, $"The request body is not a valid FHIR {name}: {ex.Message}");
         }
     }
 

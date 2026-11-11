@@ -3,7 +3,8 @@
 //
 //   dotnet run --project samples/PriorAuth.SampleClient -- http://localhost:5020
 //
-// Steps: make a key pair, register the public key, sign in, submit a request with one document, check its status.
+// Steps: make a key pair, register the public key, ask whether an order needs authorization (CRD),
+// download the questionnaire (DTR), submit the request with answers and a document (PAS), check its status.
 
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -36,50 +37,97 @@ registration.EnsureSuccessStatusCode();
 var clientId = (await registration.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("clientId").GetString()!;
 Step(2, $"Registered. The agency issued client id {clientId}.");
 
-// 3. Find the token endpoint, then sign in by sending a short-lived statement signed with the private key.
+// 3. CRD: while the clinician writes the order, ask the plan whether it needs authorization.
+//    CDS Hooks calls carry a statement signed with the private key, made for the service's own address.
+const string serviceCode = "H2019";
+var hookUrl = $"{baseUrl}/cds-services/prior-auth-order-sign";
+var hookCall = new HttpRequestMessage(HttpMethod.Post, hookUrl)
+{
+    Content = new StringContent($$"""
+        {
+          "hook": "order-sign",
+          "hookInstance": "{{Guid.NewGuid()}}",
+          "context": {
+            "userId": "Practitioner/synthetic-1",
+            "patientId": "synthetic-1",
+            "draftOrders": { "resourceType": "Bundle", "type": "collection", "entry": [{ "resource": {
+              "resourceType": "ServiceRequest", "id": "order-1", "status": "draft", "intent": "order",
+              "code": { "coding": [{ "code": "{{serviceCode}}" }] },
+              "subject": { "reference": "Patient/synthetic-1" },
+              "insurance": [{ "reference": "Coverage/synthetic-1" }] } }] }
+          }
+        }
+        """, Encoding.UTF8, "application/json"),
+};
+hookCall.Headers.Authorization = new AuthenticationHeaderValue("Bearer", SignedStatement(audience: hookUrl, includeSubject: false));
+var hookResponse = await http.SendAsync(hookCall);
+hookResponse.EnsureSuccessStatusCode();
+var coverageInformation = (await hookResponse.Content.ReadFromJsonAsync<JsonElement>())
+    .GetProperty("systemActions")[0].GetProperty("resource").GetProperty("extension")[0].GetProperty("extension");
+var paNeeded = Part(coverageInformation, "pa-needed", "valueCode");
+var questionnaireUrl = Part(coverageInformation, "questionnaire", "valueCanonical");
+Step(3, $"Asked about {serviceCode}. The plan says: prior authorization \"{paNeeded}\", questionnaire {questionnaireUrl}.");
+
+// 4. Sign in for the rest. The token endpoint is published in the SMART configuration.
 var smart = await http.GetFromJsonAsync<JsonElement>("/fhir/.well-known/smart-configuration");
 var tokenUrl = smart.GetProperty("token_endpoint").GetString()!;
-var assertion = new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
-{
-    Issuer = clientId,
-    Audience = tokenUrl,
-    Claims = new Dictionary<string, object> { ["sub"] = clientId, ["jti"] = Guid.NewGuid().ToString("N") },
-    Expires = DateTime.UtcNow.AddMinutes(2),
-    SigningCredentials = new SigningCredentials(new RsaSecurityKey(key) { KeyId = keyId }, SecurityAlgorithms.RsaSha384),
-});
 var tokenResponse = await http.PostAsync(tokenUrl, new FormUrlEncodedContent(new Dictionary<string, string>
 {
     ["grant_type"] = "client_credentials",
-    ["scope"] = "system/Claim.write system/ClaimResponse.read",
+    ["scope"] = "system/Claim.write system/ClaimResponse.read system/Questionnaire.read",
     ["client_assertion_type"] = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
-    ["client_assertion"] = assertion,
+    ["client_assertion"] = SignedStatement(audience: tokenUrl, includeSubject: true),
 }));
 tokenResponse.EnsureSuccessStatusCode();
 var token = await tokenResponse.Content.ReadFromJsonAsync<JsonElement>();
 http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.GetProperty("access_token").GetString());
-Step(3, $"Signed in. Access token is valid for {token.GetProperty("expires_in").GetInt32()} seconds.");
+Step(4, $"Signed in. Access token is valid for {token.GetProperty("expires_in").GetInt32()} seconds.");
 
-// 4. Ask whether the service needs approval and what paperwork is required.
-const string serviceCode = "H2019";
-var requirements = await http.GetFromJsonAsync<JsonElement>($"/requirements?code={serviceCode}");
-Step(4, requirements.GetArrayLength() == 0
-    ? $"{serviceCode} does not need approval."
-    : $"{serviceCode} needs approval. Paperwork: {string.Join("; ", requirements[0].GetProperty("documentation").EnumerateArray().Select(d => d.GetString()))}.");
+// 5. DTR: download the questionnaire the plan named.
+var packageResponse = await http.PostAsync("/fhir/Questionnaire/$questionnaire-package", new StringContent(
+    $$"""{ "resourceType": "Parameters", "parameter": [{ "name": "questionnaire", "valueCanonical": "{{questionnaireUrl}}" }] }""",
+    Encoding.UTF8, "application/fhir+json"));
+packageResponse.EnsureSuccessStatusCode();
+var questionnaire = (await packageResponse.Content.ReadFromJsonAsync<JsonElement>())
+    .GetProperty("parameter")[0].GetProperty("resource").GetProperty("entry")[0].GetProperty("resource");
+Step(5, $"Downloaded \"{questionnaire.GetProperty("title").GetString()}\". Questions:");
+foreach (var item in questionnaire.GetProperty("item").EnumerateArray())
+    Console.WriteLine($"     - {item.GetProperty("text").GetString()} ({item.GetProperty("type").GetString()}{(item.GetProperty("required").GetBoolean() ? ", required" : "")})");
 
-// 5. Submit the request.
+// 6. PAS: submit the request with the answers and one document. In real life a clinician fills in the answers.
 var requestId = $"SAMPLE-{DateTime.UtcNow:yyyyMMdd-HHmmss}";
-var submitted = await PostFhir("/fhir/Claim/$submit", RequestBundle(requestId, serviceCode));
-Step(5, $"Submitted {requestId}. {Describe(submitted)}");
+var submitted = await PostFhir("/fhir/Claim/$submit", RequestBundle(requestId, serviceCode, questionnaireUrl!));
+Step(6, $"Submitted {requestId} with answers and a document. {Describe(submitted)}");
 
-// 6. A person decides. Then ask again.
+// 7. A person decides. Then ask again.
 Console.WriteLine();
 Console.WriteLine($"   Open {baseUrl}/ and decide the request, then press Enter here.");
 Console.ReadLine();
-Step(6, $"Status of {requestId}. {Describe(await PostFhir("/fhir/Claim/$inquire", RequestBundle(requestId, serviceCode)))}");
+Step(7, $"Status of {requestId}. {Describe(await PostFhir("/fhir/Claim/$inquire", RequestBundle(requestId, serviceCode, questionnaireUrl!)))}");
 
 return;
 
 static void Step(int number, string text) => Console.WriteLine($"{number}. {text}");
+
+static string? Part(JsonElement extensions, string url, string valueName) =>
+    extensions.EnumerateArray().FirstOrDefault(e => e.GetProperty("url").GetString() == url) is { ValueKind: JsonValueKind.Object } found
+        ? found.GetProperty(valueName).GetString()
+        : null;
+
+// A short-lived statement signed with the private key. Each one is used once.
+string SignedStatement(string audience, bool includeSubject)
+{
+    var claims = new Dictionary<string, object> { ["jti"] = Guid.NewGuid().ToString("N") };
+    if (includeSubject) claims["sub"] = clientId;
+    return new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
+    {
+        Issuer = clientId,
+        Audience = audience,
+        Claims = claims,
+        Expires = DateTime.UtcNow.AddMinutes(2),
+        SigningCredentials = new SigningCredentials(new RsaSecurityKey(key) { KeyId = keyId }, SecurityAlgorithms.RsaSha384),
+    });
+}
 
 async Task<JsonElement> PostFhir(string path, string json)
 {
@@ -97,7 +145,7 @@ static string Describe(JsonElement claimResponse)
     return $"Answer: {meaning}. \"{claimResponse.GetProperty("disposition").GetString()}\"";
 }
 
-static string RequestBundle(string requestId, string code) => $$"""
+static string RequestBundle(string requestId, string code, string questionnaireUrl) => $$"""
     {
       "resourceType": "Bundle",
       "type": "collection",
@@ -129,6 +177,20 @@ static string RequestBundle(string requestId, string code) => $$"""
             "resourceType": "DocumentReference",
             "status": "current",
             "content": [{ "attachment": { "contentType": "text/plain", "title": "Current assessment (synthetic)", "data": "{{Convert.ToBase64String(Encoding.UTF8.GetBytes("Synthetic assessment text for demonstration only."))}}" } }]
+          }
+        },
+        {
+          "fullUrl": "urn:uuid:44444444-4444-4444-4444-444444444444",
+          "resource": {
+            "resourceType": "QuestionnaireResponse",
+            "questionnaire": "{{questionnaireUrl}}",
+            "status": "completed",
+            "item": [
+              { "linkId": "assessment-date", "answer": [{ "valueDate": "2026-10-30" }] },
+              { "linkId": "target-behaviours", "answer": [{ "valueString": "Synthetic example: elopement and aggression at school." }] },
+              { "linkId": "placement-risk", "answer": [{ "valueBoolean": true }] },
+              { "linkId": "hours-per-week", "answer": [{ "valueCoding": { "code": "11-to-20", "display": "11 to 20" } }] }
+            ]
           }
         }
       ]

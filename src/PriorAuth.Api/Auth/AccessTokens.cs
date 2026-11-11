@@ -11,7 +11,10 @@ public static class Scopes
     /// <summary>Allows reading authorization responses.</summary>
     public const string ReadResponses = "system/ClaimResponse.read";
 
-    public static readonly string[] All = [SubmitRequests, ReadResponses];
+    /// <summary>Allows downloading the questionnaires that document a request.</summary>
+    public const string ReadQuestionnaires = "system/Questionnaire.read";
+
+    public static readonly string[] All = [SubmitRequests, ReadResponses, ReadQuestionnaires];
 }
 
 /// <summary>
