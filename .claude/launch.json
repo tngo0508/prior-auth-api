@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "prior-auth-prototype",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "prototype/PriorAuth.Prototype", "--no-launch-profile", "--urls", "http://localhost:5019"],
+      "port": 5019
+    }
+  ]
+}
