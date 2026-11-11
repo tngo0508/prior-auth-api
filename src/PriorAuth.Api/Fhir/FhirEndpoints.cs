@@ -43,8 +43,14 @@ public static class FhirEndpoints
                     providerName: client.Name, // the registered name, not the one the request claims
                     submission.MemberName, submission.ServiceCode,
                     requirement?.Name ?? submission.ServiceDisplay ?? submission.ServiceCode,
-                    authorizationRequired: requirement is not null, json, now.UtcDateTime);
+                    authorizationRequired: requirement is not null, json, submission.Documents, now.UtcDateTime);
                 db.AuthorizationRequests.Add(request);
+                await db.SaveChangesAsync();
+            }
+            else if (request.Status == AuthorizationStatus.InformationRequested && submission!.Documents.Count > 0)
+            {
+                // Sending the request again with documents answers the reviewer's information request.
+                request.SupplyInformation(submission.Documents, now.UtcDateTime);
                 await db.SaveChangesAsync();
             }
 

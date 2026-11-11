@@ -4,7 +4,7 @@ using PriorAuth.Api.Domain;
 namespace PriorAuth.Api.Fhir;
 
 /// <summary>What we need out of a Da Vinci PAS request Bundle.</summary>
-public record Submission(Claim Claim, string ProviderRequestId, string ProviderName, string MemberName, string ServiceCode, string? ServiceDisplay);
+public record Submission(Claim Claim, string ProviderRequestId, string ProviderName, string MemberName, string ServiceCode, string? ServiceDisplay, IReadOnlyList<NewDocument> Documents);
 
 /// <summary>
 /// Translates between FHIR (Da Vinci Prior Authorization Support) and the domain model.
@@ -26,6 +26,9 @@ public static class PasMapper
         var requestId = claim.Identifier.FirstOrDefault()?.Value;
         if (string.IsNullOrWhiteSpace(requestId)) return (null, "Claim.identifier must carry the provider's request identifier.");
 
+        // PAS requires the insurer on the request, and the response must echo it.
+        if (claim.Insurer is null) return (null, "Claim.insurer must identify the plan the request is addressed to.");
+
         var coding = claim.Item.FirstOrDefault()?.ProductOrService?.Coding.FirstOrDefault();
         if (string.IsNullOrWhiteSpace(coding?.Code)) return (null, "Claim.item[0].productOrService must carry a service code.");
 
@@ -33,17 +36,65 @@ public static class PasMapper
         var memberName = patient?.Name.FirstOrDefault()?.ToString() ?? claim.Patient?.Display ?? "(not stated)";
         var providerName = claim.Provider?.Display ?? claim.Provider?.Reference ?? "(not stated)";
 
-        return (new Submission(claim, requestId, providerName, memberName, coding.Code, coding.Display), null);
+        var (documents, documentError) = ReadDocuments(bundle);
+        if (documentError is not null) return (null, documentError);
+
+        return (new Submission(claim, requestId, providerName, memberName, coding.Code, coding.Display, documents), null);
+    }
+
+    /// <summary>Supporting paperwork arrives as DocumentReference resources with the file inline.</summary>
+    private static (IReadOnlyList<NewDocument> Documents, string? Error) ReadDocuments(Bundle bundle)
+    {
+        var documents = new List<NewDocument>();
+        foreach (var reference in bundle.Entry.Select(e => e.Resource).OfType<DocumentReference>())
+        {
+            foreach (var attachment in reference.Content.Select(c => c.Attachment).Where(a => a is not null))
+            {
+                var title = attachment.Title ?? reference.Description ?? $"Document {documents.Count + 1}";
+                if (attachment.Data is null)
+                    return ([], $"Document '{title}' must be sent inline in attachment.data. Links are not accepted.");
+                if (!SupportingDocument.AllowedContentTypes.Contains(attachment.ContentType, StringComparer.OrdinalIgnoreCase))
+                    return ([], $"Document '{title}' has content type '{attachment.ContentType}'. Accepted types: {string.Join(", ", SupportingDocument.AllowedContentTypes)}.");
+                if (attachment.Data.Length > SupportingDocument.MaxBytes)
+                    return ([], $"Document '{title}' is larger than {SupportingDocument.MaxBytes / (1024 * 1024)} MB.");
+                documents.Add(new NewDocument(title, attachment.ContentType!.ToLowerInvariant(), attachment.Data));
+            }
+        }
+        return documents.Count > SupportingDocument.MaxPerSubmission
+            ? ([], $"At most {SupportingDocument.MaxPerSubmission} documents can be sent at once.")
+            : (documents, null);
     }
 
     public static Claim? FindClaim(Bundle bundle) => bundle.Entry.Select(e => e.Resource).OfType<Claim>().FirstOrDefault();
 
-    public static Bundle ToResponseBundle(AuthorizationRequest request, Claim claim, DateTimeOffset now) => new()
+    public static Bundle ToResponseBundle(AuthorizationRequest request, Claim claim, DateTimeOffset now)
     {
-        Type = Bundle.BundleType.Collection,
-        Timestamp = now,
-        Entry = [new Bundle.EntryComponent { FullUrl = $"urn:uuid:{Guid.NewGuid()}", Resource = ToClaimResponse(request, claim, now) }],
-    };
+        var response = ToClaimResponse(request, claim, now);
+        var bundle = new Bundle
+        {
+            Type = Bundle.BundleType.Collection,
+            Timestamp = now,
+            Entry = [new Bundle.EntryComponent { FullUrl = $"urn:uuid:{Guid.NewGuid()}", Resource = response }],
+        };
+
+        // PAS carries a request for more information as a CommunicationRequest that the ClaimResponse points to.
+        if (request.Status == AuthorizationStatus.InformationRequested)
+        {
+            var fullUrl = $"urn:uuid:{Guid.NewGuid()}";
+            bundle.Entry.Add(new Bundle.EntryComponent
+            {
+                FullUrl = fullUrl,
+                Resource = new CommunicationRequest
+                {
+                    Status = RequestStatus.Active,
+                    Subject = claim.Patient,
+                    Payload = [new CommunicationRequest.PayloadComponent { Content = new FhirString(request.Reason) }],
+                },
+            });
+            response.CommunicationRequest.Add(new ResourceReference(fullUrl));
+        }
+        return bundle;
+    }
 
     public static ClaimResponse ToClaimResponse(AuthorizationRequest request, Claim claim, DateTimeOffset now)
     {

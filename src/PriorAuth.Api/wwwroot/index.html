@@ -24,8 +24,9 @@
 </style>
 </head>
 <body>
-<div class="banner"><b>Development build.</b> No sign-in yet. Use synthetic data only.</div>
+<div class="banner"><b>Development build.</b> Staff sign-in does not exist yet. Use synthetic data only.</div>
 <h1>Prior authorization review queue</h1>
+<p class="muted"><a href="/developers.html">Developer guide for provider systems</a></p>
 <div class="top">
   <label>Reviewer name <input id="reviewer" type="text" placeholder="your name"></label>
   <button id="refresh">Refresh</button>
@@ -78,6 +79,15 @@ async function load() {
         el('div', { className: 'row' }, reason, el('button', { textContent: 'Deny', onclick: () => decide(r.id, 'deny', { reason: reason.value }, error) })),
         el('div', { className: 'row' }, missing, el('button', { textContent: 'Request information', onclick: () => decide(r.id, 'request-information', { missing: missing.value }, error) })),
         error);
+    }
+    if (r.documents.length) {
+      const docs = el('ul');
+      r.documents.forEach(d => docs.append(el('li', {},
+        el('a', { href: '/internal/requests/' + r.id + '/documents/' + d.id, textContent: d.title }),
+        ' · ' + d.contentType + ' · ' + Math.ceil(d.sizeBytes / 1024) + ' KB')));
+      box.append(el('div', { className: 'muted', textContent: 'Documents from the provider' }), docs);
+    } else {
+      box.append(el('div', { className: 'muted', textContent: 'No documents were sent.' }));
     }
     const history = el('ul');
     r.history.forEach(h => history.append(el('li', { textContent: new Date(h.atUtc + 'Z').toLocaleString() + ' · ' + h.actor + ' · ' + h.text })));

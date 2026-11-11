@@ -32,7 +32,7 @@ stateDiagram-v2
     [*] --> Pended: service is on the list
     [*] --> NotRequired: service is not on the list
     Pended --> InformationRequested: reviewer asks for something missing
-    InformationRequested --> InformationRequested: reviewer asks again
+    InformationRequested --> Pended: provider sends the missing document
     Pended --> Approved: reviewer approves, with an end date
     Pended --> Denied: reviewer denies, with a reason
     InformationRequested --> Approved
@@ -51,6 +51,8 @@ Rules the code enforces, in [AuthorizationRequest.cs](../src/PriorAuth.Api/Domai
 - Every action must name the reviewer, and every action is written to the request's history.
 - A provider that sends the same request identifier twice gets the same answer, not a second request.
 - A provider system must sign in, and can only see requests it sent itself.
+- Supporting documents must be PDF, JPEG, PNG, TIFF or plain text, at most 5 MB each and 10 per submission, and sent inline. Anything else is refused.
+- When a reviewer has asked for information, the provider answers by sending the request again with the missing documents. The request goes back to Pended. Resending at any other time changes nothing.
 
 ## The parts of the system
 
@@ -103,6 +105,16 @@ flowchart TB
 erDiagram
     ProviderClient ||--o{ AuthorizationRequest : submits
     AuthorizationRequest ||--o{ HistoryEntry : has
+    AuthorizationRequest ||--o{ SupportingDocument : has
+    SupportingDocument {
+        string Id PK
+        string AuthorizationRequestId FK
+        string Title
+        string ContentType
+        bytes Data
+        int SizeBytes
+        datetime ReceivedAtUtc
+    }
     ProviderClient {
         string ClientId PK
         string Name
@@ -140,9 +152,9 @@ The provider's original FHIR `Bundle` is kept exactly as received in `SubmittedB
 
 ## The reviewer screen
 
-![Reviewer queue showing a pended request and one waiting for information](images/review-queue.jpg)
+![Reviewer queue showing a pended request with a document from the provider and its history](images/review-queue.jpg)
 
-The screen is a single page served by the same app. It lists requests newest first and lets a reviewer approve, deny or ask for information. When a rule is broken, for example a denial with no reason, the server refuses and the page shows the server's message.
+The screen is a single page served by the same app. It lists requests newest first, shows the documents the provider sent as download links, and lets a reviewer approve, deny or ask for information. When a rule is broken, for example a denial with no reason, the server refuses and the page shows the server's message.
 
 ## How FHIR maps to the domain
 
@@ -152,15 +164,24 @@ The screen is a single page served by the same app. It lists requests newest fir
 | The signed-in client's registered name | `ProviderName` |
 | `Patient.name[0]` in the same Bundle | `MemberName` |
 | `Claim.item[0].productOrService.coding[0].code` | `ServiceCode` |
+| Each `DocumentReference.content.attachment` in the Bundle | A supporting document |
 
 | Domain state | `ClaimResponse.outcome` | Review action code | Other fields |
 |---|---|---|---|
 | Pended | `queued` | A4 | |
-| InformationRequested | `queued` | A4 | `disposition` says what is missing |
+| InformationRequested | `queued` | A4 | A `CommunicationRequest` in the Bundle, referenced from `communicationRequest`, says what is missing |
 | Approved | `complete` | A1 | `preAuthRef`, `preAuthPeriod.end` |
 | Denied | `complete` | A3 | `disposition` carries the reason |
 | NotRequired | `complete` | NA | |
 
-This mapping follows a reading of Da Vinci PAS 2.0.1. It has not been checked against the published profiles yet ([issue #8](https://github.com/tngo0508/prior-auth-api/issues/8)).
+I compared this mapping by reading against the published PAS 2.0.1 definitions on 2026-11-11. Confirmed: where the review action extension sits, its sub-extension names, the response Bundle type and timestamp, the required `insurer`, and the use of `CommunicationRequest` for information requests.
+
+Still not done ([issue #8](https://github.com/tngo0508/prior-auth-api/issues/8)):
+
+- No automated validator or Inferno run has been made against the output.
+- The code system URL used for review action codes (`https://codesystem.x12.org/005010/306`) is unconfirmed; the guide binds to an X12 value set.
+- The `CommunicationRequest` is minimal and not checked against the PAS profile for it.
+- PAS also requires `identifier` and `timestamp` on the request Bundle; this service does not enforce them yet.
+- PAS has item-level extensions (authorized dates, trace numbers) that are not produced.
 
 Previous: [1. Overview](01-overview.md) · Next: [3. Running and testing](03-running-and-testing.md)

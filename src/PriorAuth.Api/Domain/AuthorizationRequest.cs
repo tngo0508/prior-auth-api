@@ -22,6 +22,7 @@ public class DomainRuleException(string message) : Exception(message);
 public class AuthorizationRequest
 {
     private readonly List<HistoryEntry> _history = [];
+    private readonly List<SupportingDocument> _documents = [];
 
     private AuthorizationRequest() { } // for Entity Framework
 
@@ -45,13 +46,15 @@ public class AuthorizationRequest
     public DateTime? DecidedAtUtc { get; private set; }
     public string? DecidedBy { get; private set; }
     public IReadOnlyCollection<HistoryEntry> History => _history;
+    /// <summary>The paperwork the provider sent with the request or added later.</summary>
+    public IReadOnlyCollection<SupportingDocument> Documents => _documents;
 
     public bool IsOpen => Status is AuthorizationStatus.Pended or AuthorizationStatus.InformationRequested;
 
     public static AuthorizationRequest Receive(
         string clientId, string providerRequestId, string providerName, string memberName,
         string serviceCode, string serviceName, bool authorizationRequired,
-        string submittedBundleJson, DateTime nowUtc)
+        string submittedBundleJson, IReadOnlyCollection<NewDocument> documents, DateTime nowUtc)
     {
         var request = new AuthorizationRequest
         {
@@ -69,7 +72,34 @@ public class AuthorizationRequest
         request.Record(nowUtc, providerName, authorizationRequired
             ? "Received. Pended for review."
             : "Received. The service does not require prior authorization.");
+        request.Attach(documents, providerName, nowUtc);
         return request;
+    }
+
+    /// <summary>
+    /// The provider answers an information request by sending the missing paperwork.
+    /// The request goes back to the reviewer's queue.
+    /// </summary>
+    public void SupplyInformation(IReadOnlyCollection<NewDocument> documents, DateTime nowUtc)
+    {
+        if (Status != AuthorizationStatus.InformationRequested)
+            throw new DomainRuleException("Information can only be supplied while the reviewer is waiting for it.");
+        if (documents.Count == 0)
+            throw new DomainRuleException("Supplying information requires at least one document.");
+
+        Attach(documents, ProviderName, nowUtc);
+        Status = AuthorizationStatus.Pended;
+        Reason = null;
+        Record(nowUtc, ProviderName, "Provider supplied more information. Pended for review.");
+    }
+
+    private void Attach(IReadOnlyCollection<NewDocument> documents, string actor, DateTime nowUtc)
+    {
+        foreach (var document in documents)
+        {
+            _documents.Add(new SupportingDocument(document.Title, document.ContentType, document.Data, nowUtc));
+            Record(nowUtc, actor, $"Document received: {document.Title} ({document.ContentType}, {document.Data.Length:N0} bytes).");
+        }
     }
 
     public void Approve(DateOnly through, string authorizationNumber, string reviewer, DateTime nowUtc)
@@ -138,4 +168,23 @@ public class HistoryEntry(DateTime atUtc, string actor, string text)
     public DateTime AtUtc { get; private set; } = atUtc;
     public string Actor { get; private set; } = actor;
     public string Text { get; private set; } = text;
+}
+
+/// <summary>A document as it arrives from the provider, before it is stored.</summary>
+public record NewDocument(string Title, string ContentType, byte[] Data);
+
+/// <summary>A piece of paperwork a provider sent to support an authorization request.</summary>
+public class SupportingDocument(string title, string contentType, byte[] data, DateTime receivedAtUtc)
+{
+    public const int MaxBytes = 5 * 1024 * 1024;
+    public const int MaxPerSubmission = 10;
+    /// <summary>Only formats a reviewer can open safely. Anything else is refused at the door.</summary>
+    public static readonly string[] AllowedContentTypes = ["application/pdf", "image/jpeg", "image/png", "image/tiff", "text/plain"];
+
+    public string Id { get; private set; } = Guid.NewGuid().ToString("N");
+    public string Title { get; private set; } = title;
+    public string ContentType { get; private set; } = contentType;
+    public byte[] Data { get; private set; } = data;
+    public int SizeBytes { get; private set; } = data.Length;
+    public DateTime ReceivedAtUtc { get; private set; } = receivedAtUtc;
 }

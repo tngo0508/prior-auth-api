@@ -8,6 +8,7 @@ namespace PriorAuth.Api.Review;
 public record ApproveBody(DateOnly Through, string Reviewer);
 public record DenyBody(string Reason, string Reviewer);
 public record RequestInformationBody(string Missing, string Reviewer);
+public record DocumentSummary(string Id, string Title, string ContentType, int SizeBytes, DateTime ReceivedAtUtc);
 
 /// <summary>
 /// The endpoints the agency's reviewer screen calls. These are internal and are not part of the FHIR API.
@@ -22,7 +23,23 @@ public static class ReviewerEndpoints
         group.MapGet("", async (PriorAuthDb db) =>
         {
             var requests = await db.AuthorizationRequests.Include(r => r.History).OrderByDescending(r => r.ReceivedAtUtc).ToListAsync();
-            return Results.Json(requests.Select(Summary));
+            // Document details without the file contents.
+            var documents = (await db.SupportingDocuments
+                    .Select(d => new { RequestId = EF.Property<string>(d, "AuthorizationRequestId"), d.Id, d.Title, d.ContentType, d.SizeBytes, d.ReceivedAtUtc })
+                    .ToListAsync())
+                .ToLookup(d => d.RequestId, d => new DocumentSummary(d.Id, d.Title, d.ContentType, d.SizeBytes, d.ReceivedAtUtc));
+            return Results.Json(requests.Select(r => Summary(r, documents[r.Id])));
+        });
+
+        group.MapGet("{id}/documents/{documentId}", async (string id, string documentId, PriorAuthDb db, HttpResponse response) =>
+        {
+            var document = await db.SupportingDocuments.FirstOrDefaultAsync(d =>
+                d.Id == documentId && EF.Property<string>(d, "AuthorizationRequestId") == id);
+            if (document is null) return Results.NotFound();
+
+            // The file came from outside: always download it, and never let the browser guess its type.
+            response.Headers.XContentTypeOptions = "nosniff";
+            return Results.File(document.Data, document.ContentType, fileDownloadName: SafeFileName(document.Title));
         });
 
         group.MapPost("{id}/approve", (string id, ApproveBody body, PriorAuthDb db, TimeProvider clock) =>
@@ -48,13 +65,19 @@ public static class ReviewerEndpoints
             return Results.Problem(ex.Message, statusCode: StatusCodes.Status422UnprocessableEntity);
         }
         await db.SaveChangesAsync();
-        return Results.Json(Summary(request));
+        return Results.Json(Summary(request, []));
     }
 
     private static string NewAuthorizationNumber(TimeProvider clock) =>
         $"PA-{clock.GetUtcNow():yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()}";
 
-    private static object Summary(AuthorizationRequest r) => new
+    private static string SafeFileName(string title)
+    {
+        var cleaned = new string(title.Select(c => char.IsLetterOrDigit(c) || c is ' ' or '-' or '_' or '.' ? c : '_').ToArray()).Trim();
+        return cleaned.Length == 0 ? "document" : cleaned[..Math.Min(cleaned.Length, 80)];
+    }
+
+    private static object Summary(AuthorizationRequest r, IEnumerable<DocumentSummary> documents) => new
     {
         r.Id,
         r.ProviderRequestId,
@@ -70,6 +93,7 @@ public static class ReviewerEndpoints
         r.ReceivedAtUtc,
         r.DecidedAtUtc,
         r.DecidedBy,
+        Documents = documents.OrderBy(d => d.ReceivedAtUtc),
         History = r.History.OrderBy(h => h.AtUtc).ThenBy(h => h.Id).Select(h => new { h.AtUtc, h.Actor, h.Text }),
     };
 }

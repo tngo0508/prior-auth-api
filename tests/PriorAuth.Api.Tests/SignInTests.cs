@@ -227,6 +227,7 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
                 "use": "preauthorization",
                 "patient": { "display": "Synthetic Patient" },
                 "created": "2026-11-11",
+                "insurer": { "display": "County Behavioral Health Plan (synthetic)" },
                 "provider": { "display": "A Name The Request Claims" },
                 "priority": { "coding": [{ "code": "normal" }] },
                 "insurance": [{ "sequence": 1, "focal": true, "coverage": { "display": "Synthetic coverage" } }],

@@ -4,21 +4,47 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace PriorAuth.Api.Tests;
 
-/// <summary>Runs the real application against a throwaway SQLite database file.</summary>
+/// <summary>
+/// Runs the real application against a throwaway database.
+/// By default that is a SQLite file. To run the same tests on SQL Server, with the real migrations,
+/// set PRIORAUTH_TEST_SQLSERVER to a server connection string without a database name,
+/// for example: Server=(localdb)\MSSQLLocalDB;Integrated Security=true
+/// </summary>
 public sealed class ApiFactory : WebApplicationFactory<Program>
 {
-    private readonly string _databasePath = Path.Combine(Path.GetTempPath(), $"priorauth-test-{Guid.NewGuid():N}.db");
+    private static readonly string? SqlServer = Environment.GetEnvironmentVariable("PRIORAUTH_TEST_SQLSERVER");
+    private readonly string _name = $"priorauth-test-{Guid.NewGuid():N}";
+    private bool _databaseDropped;
 
-    protected override void ConfigureWebHost(IWebHostBuilder builder) =>
-        builder.UseSetting("ConnectionStrings:PriorAuth", $"Data Source={_databasePath};Pooling=False");
+    private string SqlitePath => Path.Combine(Path.GetTempPath(), _name + ".db");
+
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        if (SqlServer is null)
+        {
+            builder.UseSetting("ConnectionStrings:PriorAuth", $"Data Source={SqlitePath};Pooling=False");
+        }
+        else
+        {
+            builder.UseSetting("Database:Provider", "SqlServer");
+            builder.UseSetting("ConnectionStrings:PriorAuth", $"{SqlServer.TrimEnd(';')};Database={_name};Pooling=False");
+        }
+    }
 
     protected override void Dispose(bool disposing)
     {
+        if (disposing && SqlServer is not null && !_databaseDropped)
+        {
+            _databaseDropped = true;
+            using var scope = Services.CreateScope();
+            scope.ServiceProvider.GetRequiredService<PriorAuth.Api.Data.PriorAuthDb>().Database.EnsureDeleted();
+        }
         base.Dispose(disposing);
-        if (File.Exists(_databasePath)) File.Delete(_databasePath);
+        if (File.Exists(SqlitePath)) File.Delete(SqlitePath);
     }
 }
 
@@ -99,6 +125,33 @@ public class PriorAuthApiTests(ApiFactory factory) : IClassFixture<ApiFactory>, 
         var response = await _client.PostAsync("/fhir/Claim/$submit", Fhir(RequestBundle(NewRequestId(), "H2019", use: "claim")));
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_claim_that_does_not_name_the_insurer_is_rejected()
+    {
+        var withoutInsurer = RequestBundle(NewRequestId(), "H2019").Replace("\"insurer\": { \"display\": \"County Behavioral Health Plan (synthetic)\" },", "");
+
+        var response = await _client.PostAsync("/fhir/Claim/$submit", Fhir(withoutInsurer));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("Claim.insurer", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task An_information_request_is_returned_as_a_CommunicationRequest_the_response_points_to()
+    {
+        var requestId = NewRequestId();
+        var id = (await Submit(requestId, "H2019")).GetProperty("id").GetString()!;
+        await _client.PostAsJsonAsync($"/internal/requests/{id}/request-information", new { missing = "Client plan", reviewer = "Test Reviewer" });
+
+        var bundle = await (await _client.PostAsync("/fhir/Claim/$inquire", Fhir(RequestBundle(requestId, "H2019")))).Content.ReadFromJsonAsync<JsonElement>();
+        var claimResponse = bundle.GetProperty("entry")[0].GetProperty("resource");
+        var communication = bundle.GetProperty("entry")[1];
+
+        Assert.Equal("CommunicationRequest", communication.GetProperty("resource").GetProperty("resourceType").GetString());
+        Assert.Equal("Client plan", communication.GetProperty("resource").GetProperty("payload")[0].GetProperty("contentString").GetString());
+        Assert.Equal(communication.GetProperty("fullUrl").GetString(), claimResponse.GetProperty("communicationRequest")[0].GetProperty("reference").GetString());
     }
 
     // ---------- Decisions ----------

@@ -35,7 +35,23 @@ dotnet run --project samples/PriorAuth.SampleClient -- http://localhost:5020
 
 It registers, signs in, submits a request and waits for you to decide it in the queue. [5. Sign-in](05-sign-in.md) explains what it is doing. [requests.http](../src/PriorAuth.Api/requests.http) holds the calls that need no token.
 
-To start with an empty database, stop the app and delete `src/PriorAuth.Api/priorauth.db`.
+To start with an empty database, stop the app and delete `src/PriorAuth.Api/priorauth.db`. Do this too after pulling changes that alter the data model: the local SQLite file is created once and is not upgraded.
+
+The developer guide for provider systems is served at http://localhost:5020/developers.html.
+
+### Running on SQL Server
+
+SQLite is for local development. On SQL Server the app applies its migrations at start-up:
+
+```bash
+dotnet run --project src/PriorAuth.Api --no-launch-profile --urls http://localhost:5020 --Database:Provider=SqlServer --ConnectionStrings:PriorAuth="Server=(localdb)\MSSQLLocalDB;Database=PriorAuthDev;Integrated Security=true"
+```
+
+After changing the data model, add a migration:
+
+```bash
+dotnet ef migrations add NameOfTheChange --project src/PriorAuth.Api -o Data/Migrations
+```
 
 ## The endpoints
 
@@ -64,6 +80,7 @@ These only answer callers on the server's own machine until staff sign-in exists
 | `POST /internal/requests/{id}/approve` | `{ "through": "2027-02-28", "reviewer": "name" }` |
 | `POST /internal/requests/{id}/deny` | `{ "reason": "text", "reviewer": "name" }` |
 | `POST /internal/requests/{id}/request-information` | `{ "missing": "text", "reviewer": "name" }` |
+| `GET /internal/requests/{id}/documents/{documentId}` | Downloads one supporting document |
 | `GET /internal/clients` | |
 | `POST /internal/clients` | `{ "name": "provider name", "jwks": { "keys": [ ... ] } }` |
 | `POST /internal/clients/{clientId}/deactivate` | |
@@ -76,7 +93,7 @@ A broken rule returns status 422 with the reason in `detail`.
 dotnet test
 ```
 
-The tests start the real application against a temporary database and call it over HTTP, signing in the way a provider system would. There are 37, in [PriorAuthApiTests.cs](../tests/PriorAuth.Api.Tests/PriorAuthApiTests.cs) and [SignInTests.cs](../tests/PriorAuth.Api.Tests/SignInTests.cs). Each test name is a sentence stating a behaviour:
+The tests start the real application against a temporary database and call it over HTTP, signing in the way a provider system would. There are 48, in [PriorAuthApiTests.cs](../tests/PriorAuth.Api.Tests/PriorAuthApiTests.cs), [SignInTests.cs](../tests/PriorAuth.Api.Tests/SignInTests.cs) and [SupportingDocumentTests.cs](../tests/PriorAuth.Api.Tests/SupportingDocumentTests.cs). Each test name is a sentence stating a behaviour:
 
 | Area | Behaviours covered |
 |---|---|
@@ -86,6 +103,13 @@ The tests start the real application against a temporary database and call it ov
 | Reading | A response can be read by id; an unknown request returns 404; the capability statement advertises submit and inquire. |
 | Getting a token | A valid assertion gets a 300-second token; refused when signed with another key, from an unregistered or deactivated client, addressed to another server, expired, too long-lived, reused, or asking for no supported scope. |
 | Registering | A key set containing a private key is refused. |
+| Supporting documents | A document reaches the reviewer unchanged and is served as a download; unaccepted types, oversized files and links are refused; sending the missing document answers an information request; resending at other times changes nothing. |
 | Using the API | No token gives 401; the descriptive endpoints need none; a token without the read scope cannot read; a provider cannot see another provider's request; two providers can use the same request number; the registered name is recorded, not the claimed one. |
+
+By default the tests use a temporary SQLite file. To run the same tests on SQL Server, using the real migrations, set an environment variable first. Each test class gets its own database and drops it afterwards.
+
+```powershell
+$env:PRIORAUTH_TEST_SQLSERVER = 'Server=(localdb)\MSSQLLocalDB;Integrated Security=true'; dotnet test
+```
 
 Previous: [2. How it works](02-how-it-works.md) · Next: [4. Status and open questions](04-status-and-open-questions.md)

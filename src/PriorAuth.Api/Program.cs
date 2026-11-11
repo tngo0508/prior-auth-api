@@ -13,7 +13,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Configuration.AddJsonFile("service-requirements.json", optional: false, reloadOnChange: false);
 
 builder.Services.AddDbContext<PriorAuthDb>((services, options) =>
-    options.UseSqlite(services.GetRequiredService<IConfiguration>().GetConnectionString("PriorAuth")));
+    PriorAuthDb.Configure(options, services.GetRequiredService<IConfiguration>()));
 builder.Services.AddSingleton<FhirJson>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(services => new ServiceRequirementCatalog(
@@ -24,9 +24,20 @@ var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
 {
-    // Creates the database on first run. Replace with migrations before the schema needs to change in place.
-    scope.ServiceProvider.GetRequiredService<PriorAuthDb>().Database.EnsureCreated();
+    // SQL Server: apply any migrations that have not been applied yet.
+    // SQLite (local development and tests): create the schema from the model.
+    var database = scope.ServiceProvider.GetRequiredService<PriorAuthDb>().Database;
+    if (database.IsSqlServer()) database.Migrate(); else database.EnsureCreated();
 }
+
+// An unexpected failure is logged in full on the server; the caller gets a FHIR error with no internals in it.
+app.UseExceptionHandler(handler => handler.Run(async context =>
+{
+    context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+    await context.RequestServices.GetRequiredService<FhirJson>()
+        .Problem("The server could not process the request. Try again later.", StatusCodes.Status500InternalServerError)
+        .ExecuteAsync(context);
+}));
 
 app.UseDefaultFiles();
 app.UseStaticFiles();

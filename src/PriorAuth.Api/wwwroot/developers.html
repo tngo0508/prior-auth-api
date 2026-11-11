@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prior Authorization API: developer guide</title>
+<style>
+  :root { --bg:#fff; --fg:#1c1c1c; --muted:#5c5c5c; --line:#cfcfcf; --card:#f6f6f4; --accent:#0b5cad; --warn:#7a5200; --warnbg:#fff3cd; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#17171a; --fg:#ececec; --muted:#a8a8a8; --line:#3d3d42; --card:#222226; --accent:#7db8f2; --warn:#f0cf7a; --warnbg:#3a3112; } }
+  * { box-sizing: border-box; }
+  body { font: 16px/1.6 system-ui, sans-serif; margin: 0 auto; padding: 16px; max-width: 860px; background: var(--bg); color: var(--fg); }
+  h1 { font-size: 24px; margin: 8px 0; } h2 { font-size: 19px; margin: 28px 0 8px; border-top: 1px solid var(--line); padding-top: 18px; }
+  a { color: var(--accent); } code { font: 14px ui-monospace, Consolas, monospace; background: var(--card); padding: 1px 4px; border-radius: 4px; }
+  pre { font: 13px/1.45 ui-monospace, Consolas, monospace; background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 10px; overflow-x: auto; }
+  pre code { background: none; padding: 0; }
+  .wrap { overflow-x: auto; } table { border-collapse: collapse; width: 100%; font-size: 15px; } th, td { border: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
+  .banner { background: var(--warnbg); color: var(--warn); border: 1px solid var(--line); padding: 8px 12px; border-radius: 6px; font-size: 14px; }
+  .muted { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="banner"><b>Development build.</b> Not a production service. Use synthetic data only.</div>
+<h1>Prior Authorization API: developer guide</h1>
+<p class="muted">For developers of provider systems that will request prior authorization from the plan.</p>
+
+<p>This API lets your system ask whether a service needs prior authorization, see what documentation is required, send a request with that documentation, and get the plan's answer. It uses HL7 FHIR R4 and follows the Da Vinci Prior Authorization Support (PAS) guide. Drugs are out of scope.</p>
+
+<h2>1. Get registered</h2>
+<p>Create an RSA or EC key pair. Keep the private key. Send the plan your public key as a JSON Web Key Set. The plan registers your system and gives you a <code>client_id</code>. Never send a private key; a key set containing one is refused.</p>
+
+<h2>2. Sign in</h2>
+<p>Sign-in follows SMART Backend Services. Read <a href="/fhir/.well-known/smart-configuration"><code>/fhir/.well-known/smart-configuration</code></a> to find the token endpoint, then post a signed assertion to it:</p>
+<pre><code>POST /auth/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=client_credentials
+&amp;scope=system/Claim.write system/ClaimResponse.read
+&amp;client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer
+&amp;client_assertion=&lt;signed JWT&gt;</code></pre>
+<p>The assertion is a JWT signed with RS384 or ES384 whose claims are:</p>
+<div class="wrap"><table>
+<tr><th>Claim</th><th>Value</th></tr>
+<tr><td><code>iss</code> and <code>sub</code></td><td>Your <code>client_id</code></td></tr>
+<tr><td><code>aud</code></td><td>The token endpoint URL exactly as published</td></tr>
+<tr><td><code>exp</code></td><td>No more than five minutes ahead</td></tr>
+<tr><td><code>jti</code></td><td>A value you never reuse. Each assertion works once.</td></tr>
+</table></div>
+<p>The answer contains an <code>access_token</code> valid for 300 seconds. Send it on every call as <code>Authorization: Bearer &lt;token&gt;</code>, and sign in again when it expires.</p>
+
+<h2>3. Check what needs authorization</h2>
+<p><a href="/requirements"><code>GET /requirements</code></a> lists every service that needs prior authorization and the documentation required for each. <code>GET /requirements?code=H2019</code> answers for one service; an empty list means no authorization is needed. No token is required.</p>
+
+<h2>4. Submit a request</h2>
+<p><code>POST /fhir/Claim/$submit</code> with <code>Content-Type: application/fhir+json</code>. The body is a FHIR <code>Bundle</code> of type <code>collection</code> containing:</p>
+<div class="wrap"><table>
+<tr><th>Resource</th><th>What we read</th></tr>
+<tr><td><code>Claim</code> (required)</td><td><code>use</code> must be <code>preauthorization</code>. <code>identifier[0].value</code> is your request number. <code>insurer</code> is required. <code>item[0].productOrService.coding[0].code</code> is the service code. All elements FHIR itself requires must be present.</td></tr>
+<tr><td><code>Patient</code></td><td>The member's name.</td></tr>
+<tr><td><code>DocumentReference</code> (zero or more)</td><td>Supporting documents, sent inline in <code>content.attachment.data</code>. Accepted types: PDF, JPEG, PNG, TIFF, plain text. Up to 5 MB each and 10 per submission. Links are not accepted.</td></tr>
+</table></div>
+<p>The answer is a <code>Bundle</code> whose first entry is a <code>ClaimResponse</code>. Read the decision from the review action code in <code>item[0].adjudication[0].extension</code>:</p>
+<div class="wrap"><table>
+<tr><th>Code</th><th><code>outcome</code></th><th>Meaning</th><th>Also look at</th></tr>
+<tr><td>A4</td><td><code>queued</code></td><td>Pended. A reviewer has not decided yet.</td><td><code>communicationRequest</code>, if the reviewer needs more information</td></tr>
+<tr><td>A1</td><td><code>complete</code></td><td>Approved.</td><td><code>preAuthRef</code> (authorization number), <code>preAuthPeriod.end</code></td></tr>
+<tr><td>A3</td><td><code>complete</code></td><td>Denied.</td><td><code>disposition</code> (the specific reason)</td></tr>
+<tr><td>NA</td><td><code>complete</code></td><td>No authorization is required for this service.</td><td></td></tr>
+</table></div>
+<p>Sending the same request number again returns the current answer; it does not create a second request.</p>
+
+<h2>5. Get the decision</h2>
+<p>A person reviews every request, so the first answer is normally "pended". Ask again with <code>POST /fhir/Claim/$inquire</code>, sending a Bundle whose Claim carries the same request number, or read <code>GET /fhir/ClaimResponse/{id}</code>.</p>
+
+<h2>6. Answer a request for more information</h2>
+<p>When the reviewer needs something, the response Bundle includes a <code>CommunicationRequest</code> whose <code>payload.contentString</code> says what is missing. Send the request again to <code>$submit</code> with the same request number and the missing <code>DocumentReference</code> resources. The request returns to the review queue.</p>
+
+<h2>Errors</h2>
+<div class="wrap"><table>
+<tr><th>Status</th><th>Meaning</th></tr>
+<tr><td>400</td><td>The body is not valid FHIR, or breaks a rule above. The body is an <code>OperationOutcome</code> that says why.</td></tr>
+<tr><td>401</td><td>No token, an expired token, or a refused sign-in.</td></tr>
+<tr><td>403</td><td>The token lacks the needed scope, or your registration is no longer active.</td></tr>
+<tr><td>404</td><td>No such request among the ones your system sent.</td></tr>
+</table></div>
+
+<h2>Machine-readable descriptions</h2>
+<p><a href="/fhir/metadata"><code>/fhir/metadata</code></a> is the FHIR CapabilityStatement. <a href="/fhir/.well-known/smart-configuration"><code>/fhir/.well-known/smart-configuration</code></a> describes sign-in.</p>
+</body>
+</html>

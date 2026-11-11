@@ -5,9 +5,12 @@ Last updated 2026-11-11.
 ## What exists
 
 - A learning prototype you can drive from one page.
-- A service with a database, the request rules, the provider endpoints, a reviewer screen, and 37 passing automated tests.
+- A service with a database, the request rules, the provider endpoints, a reviewer screen, and 48 automated tests that pass on both SQLite and SQL Server.
 - Sign-in for provider systems (SMART Backend Services), with each provider limited to its own requests.
 - A sample provider client.
+- Supporting documents: sent with a request, shown to the reviewer, and used to answer an information request.
+- SQL Server support with migrations.
+- A developer guide for provider systems, served by the app at `/developers.html`.
 - This documentation.
 
 ## What does not exist yet
@@ -17,11 +20,11 @@ Last updated 2026-11-11.
 | Single instance only | The token signing key and the memory of used sign-in assertions live in one process. | [#14](https://github.com/tngo0508/prior-auth-api/issues/14) |
 | No sign-in for agency staff | The reviewer's name is typed in, not verified. As a stopgap, the internal endpoints only answer callers on the server's own machine. The service must not hold real data until this is done. | [#2](https://github.com/tngo0508/prior-auth-api/issues/2) |
 | Placeholder service list | The four services and their paperwork are invented examples. | [#1](https://github.com/tngo0508/prior-auth-api/issues/1) |
-| FHIR output not validated | The response shape follows a reading of PAS 2.0.1 and has not been run through a validator or the Inferno test kit. | [#8](https://github.com/tngo0508/prior-auth-api/issues/8) |
-| Attachments | A provider cannot yet send the supporting documents with the request. | [#12](https://github.com/tngo0508/prior-auth-api/issues/12) |
+| FHIR output not machine-validated | The response shape was compared by reading against the published PAS 2.0.1 definitions, but has not been run through a validator or the Inferno test kit. Known gaps are listed in [How it works](02-how-it-works.md). | [#8](https://github.com/tngo0508/prior-auth-api/issues/8) |
+| Documents are not scanned | Files from providers are restricted by type and size and always served as downloads, but are not virus-scanned. | [#15](https://github.com/tngo0508/prior-auth-api/issues/15) |
 | Simple requirements list | Questions 1 and 2 are a plain list, not the CRD and DTR standards. | [#7](https://github.com/tngo0508/prior-auth-api/issues/7), [#10](https://github.com/tngo0508/prior-auth-api/issues/10) |
-| Database creation | The database is created on first run. Schema changes need migrations before real data is stored. | [#13](https://github.com/tngo0508/prior-auth-api/issues/13) |
-| Public documentation and sandbox | Required by BHIN 26-008. | [#9](https://github.com/tngo0508/prior-auth-api/issues/9) |
+| No hosted environment | Nothing is deployed. Hosting, TLS, backups and monitoring are undecided. | [#4](https://github.com/tngo0508/prior-auth-api/issues/4) |
+| Public sandbox | BHIN 26-008 requires public documentation; the developer guide exists but is only served locally, and there is no sandbox. | [#9](https://github.com/tngo0508/prior-auth-api/issues/9) |
 
 ## Decisions made so far
 

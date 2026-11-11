@@ -1,9 +1,9 @@
-﻿// A sample of what a provider's system does to use the Prior Authorization API.
+// A sample of what a provider's system does to use the Prior Authorization API.
 // It is a teaching aid and a reference for providers' developers. Synthetic data only.
 //
 //   dotnet run --project samples/PriorAuth.SampleClient -- http://localhost:5020
 //
-// Steps: make a key pair, register the public key, sign in, submit a request, check its status.
+// Steps: make a key pair, register the public key, sign in, submit a request with one document, check its status.
 
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -122,6 +122,14 @@ static string RequestBundle(string requestId, string code) => $$"""
         {
           "fullUrl": "urn:uuid:22222222-2222-2222-2222-222222222222",
           "resource": { "resourceType": "Patient", "name": [{ "family": "Testpatient", "given": ["Alex"] }] }
+        },
+        {
+          "fullUrl": "urn:uuid:33333333-3333-3333-3333-333333333333",
+          "resource": {
+            "resourceType": "DocumentReference",
+            "status": "current",
+            "content": [{ "attachment": { "contentType": "text/plain", "title": "Current assessment (synthetic)", "data": "{{Convert.ToBase64String(Encoding.UTF8.GetBytes("Synthetic assessment text for demonstration only."))}}" } }]
+          }
         }
       ]
     }
