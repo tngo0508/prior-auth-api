@@ -238,7 +238,9 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task With_a_configured_public_address_a_foreign_Host_header_cannot_change_the_audience()
     {
-        using var configured = factory.WithWebHostBuilder(b => b.UseSetting("Auth:PublicBaseUrl", "http://localhost"));
+        // Host filtering (AllowedHosts) would already refuse the foreign host name with 400. Switch it off here to prove
+        // the second defence on its own: the audience comes from configuration, never from the Host header.
+        using var configured = factory.WithWebHostBuilder(b => b.UseSetting("Auth:PublicBaseUrl", "http://localhost").UseSetting("AllowedHosts", "*"));
         var http = configured.CreateClient();
         var provider = await TestProvider.RegisterAsync(http);
 
@@ -492,7 +494,9 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
         var readByB = await clinicB.GetAsync($"/fhir/ClaimResponse/{id}");
         var readByA = await clinicA.GetAsync($"/fhir/ClaimResponse/{id}");
 
-        Assert.Equal(HttpStatusCode.NotFound, inquiryByB.StatusCode);
+        // An inquiry is a search: another provider finds nothing, so it gets an empty result.
+        Assert.Equal(HttpStatusCode.OK, inquiryByB.StatusCode);
+        Assert.False((await inquiryByB.Content.ReadFromJsonAsync<JsonElement>()).TryGetProperty("entry", out _));
         Assert.Equal(HttpStatusCode.NotFound, readByB.StatusCode);
         Assert.Equal(HttpStatusCode.OK, readByA.StatusCode);
     }

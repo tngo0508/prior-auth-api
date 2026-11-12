@@ -32,6 +32,8 @@ var app = builder.Build();
 // instead of failing every call.
 app.Services.GetRequiredService<ServiceRequirementCatalog>();
 app.Services.GetRequiredService<PlanClock>();
+// Outside Development the public https address must be configured; it is never taken from the caller's Host header.
+PublicUrl.ValidateConfiguration(app.Configuration, app.Environment);
 
 using (var scope = app.Services.CreateScope())
 {
