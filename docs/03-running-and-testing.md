@@ -35,6 +35,8 @@ dotnet run --project samples/PriorAuth.SampleClient -- http://localhost:5020
 
 It registers, asks whether an order needs authorization, signs in, downloads the questionnaire, submits a request with answers and a document, and waits for you to decide it in the queue. [5. Sign-in](05-sign-in.md) and [6. CRD and DTR](06-crd-and-dtr.md) explain what it is doing. [requests.http](../src/PriorAuth.Api/requests.http) holds the calls that need no token.
 
+For a demo to people who are not developers, run `dotnet run --project samples/PriorAuth.ClinicDemo` instead and open http://localhost:5030. It does the same steps from a browser page; the README's "Demo for management" section has the script.
+
 To start with an empty database, stop the app and delete `src/PriorAuth.Api/priorauth.db`. Do this too after pulling changes that alter the data model: the local SQLite file is created once and is not upgraded.
 
 The developer guide for provider systems is served at http://localhost:5020/developers.html.

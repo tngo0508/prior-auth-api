@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sunrise Youth Clinic: prior authorization demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #12343B;
+    --ink-soft: #4C6469;
+    --paper: #F3F7F7;
+    --panel: #FFFFFF;
+    --rule: #D3E0E1;
+    --sun: #E8A33D;
+    --sun-wash: #FCF1DF;
+    --yes: #2E7D5B;
+    --no: #B03A2E;
+    --wait: #5A6B70;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font: 400 1.125rem/1.55 "Atkinson Hyperlegible", system-ui, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
+    padding: 1.25rem clamp(1rem, 4vw, 3rem);
+    border-bottom: 1px solid var(--rule);
+    background: var(--panel);
+  }
+  header h1 { margin: 0; font-size: 1.5rem; }
+  header p { margin: 0; color: var(--ink-soft); font-size: 1rem; }
+  main {
+    display: grid; grid-template-columns: minmax(14rem, 20rem) 1fr; gap: clamp(1.5rem, 4vw, 3.5rem);
+    padding: 2rem clamp(1rem, 4vw, 3rem) 4rem; max-width: 78rem; margin: 0 auto;
+  }
+  .order { align-self: start; }
+  @media (min-width: 901px) { .order { position: sticky; top: 1.5rem; } }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .order h2 { font-size: 1.125rem; margin: 0 0 .75rem; color: var(--ink-soft); font-weight: 400; }
+  .order dl { margin: 0; display: grid; gap: .9rem; }
+  .order dt { font-size: .9rem; color: var(--ink-soft); }
+  .order dd { margin: 0; font-weight: 700; font-size: 1.2rem; line-height: 1.3; }
+  .order .note { margin-top: 1.5rem; font-size: .9rem; color: var(--ink-soft); }
+
+  ol.steps { list-style: none; margin: 0; padding: 0; counter-reset: step; }
+  .step {
+    counter-increment: step; position: relative;
+    padding: 0 0 2.25rem 4rem; border-left: 3px solid var(--rule); margin-left: 1.25rem;
+  }
+  .step:last-child { border-left-color: transparent; }
+  .step::before {
+    content: counter(step); position: absolute; left: -1.4rem; top: -.2rem;
+    width: 2.6rem; height: 2.6rem; border-radius: 50%;
+    display: grid; place-items: center; font-weight: 700; font-size: 1.2rem;
+    background: var(--paper); border: 3px solid var(--rule); color: var(--ink-soft);
+  }
+  .step.current::before { background: var(--sun); border-color: var(--sun); color: var(--ink); }
+  .step.done::before { background: var(--ink); border-color: var(--ink); color: var(--paper); content: "✓"; }
+  .step.done { border-left-color: var(--ink); }
+  .step.locked { opacity: .45; }
+  .step.done > button { display: none; }
+  .step h3 { margin: 0 0 .2rem; font-size: 1.45rem; line-height: 1.25; }
+  .step .who { margin: 0 0 1rem; color: var(--ink-soft); }
+
+  button {
+    font: inherit; font-weight: 700; cursor: pointer;
+    padding: .7rem 1.4rem; border-radius: .5rem; border: 2px solid var(--ink);
+    background: var(--ink); color: var(--paper);
+  }
+  button.quiet { background: transparent; color: var(--ink); }
+  button:disabled { cursor: default; opacity: .5; }
+  button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px solid var(--sun); outline-offset: 3px; }
+  a { color: var(--ink); font-weight: 700; }
+
+  .answer { margin-top: 1rem; padding: 1rem 1.25rem; background: var(--panel); border-left: 6px solid var(--wait); border-radius: 0 .5rem .5rem 0; }
+  .answer[hidden] { display: none; }
+  .answer .verdict { font-size: clamp(1.8rem, 3.4vw, 2.6rem); font-weight: 700; line-height: 1.15; margin: 0; }
+  .answer .speed { color: var(--ink-soft); margin: .15rem 0 0; }
+  .answer .detail { margin: .6rem 0 0; max-width: 60ch; }
+  .answer.yes { border-left-color: var(--yes); } .answer.yes .verdict { color: var(--yes); }
+  .answer.no { border-left-color: var(--no); } .answer.no .verdict { color: var(--no); }
+  .answer.attention { border-left-color: var(--sun); background: var(--sun-wash); }
+  .answer.form-answer .verdict { font-size: 1.35rem; }
+  .answer.error { border-left-color: var(--no); } .answer.error .verdict { font-size: 1.3rem; color: var(--no); }
+
+  table.form { border-collapse: collapse; width: 100%; max-width: 52rem; margin-top: .75rem; font-size: 1.05rem; }
+  table.form th, table.form td { text-align: left; vertical-align: top; padding: .55rem .75rem .55rem 0; border-bottom: 1px solid var(--rule); }
+  table.form th { font-weight: 400; color: var(--ink-soft); width: 55%; }
+  table.form td { font-weight: 700; }
+  .attached { margin: .75rem 0 0; }
+
+  details { margin-top: .9rem; font-size: .95rem; }
+  summary { cursor: pointer; color: var(--ink-soft); }
+  details pre { max-height: 22rem; overflow: auto; background: var(--ink); color: #E3EEEF; padding: 1rem; border-radius: .5rem; font-size: .8rem; line-height: 1.4; }
+  details h4 { margin: .8rem 0 .3rem; font-size: .95rem; }
+
+  .waiting-dot { display: inline-block; width: .7rem; height: .7rem; border-radius: 50%; background: var(--sun); margin-right: .5rem; animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
+  @media (prefers-reduced-motion: reduce) { .waiting-dot { animation: none; } }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Sunrise Youth Clinic</h1>
+    <p>A pretend clinic system asking the county plan for approval. Synthetic data only.</p>
+  </div>
+  <button class="quiet" id="restart" type="button">Start again</button>
+</header>
+
+<main>
+  <aside class="order" aria-label="The order">
+    <h2>Today's order</h2>
+    <dl>
+      <div><dt>Member</dt><dd>Alex Testpatient, 14</dd></div>
+      <div><dt>Service</dt><dd>Therapeutic behavioral services (TBS)</dd></div>
+      <div><dt>Amount</dt><dd>10 hours a week for 12 weeks</dd></div>
+      <div><dt>Plan</dt><dd>County Behavioral Health Plan</dd></div>
+    </dl>
+    <p class="note">TBS is one of the services the plan must approve before it starts.</p>
+  </aside>
+
+  <ol class="steps">
+    <li class="step current" id="step-1">
+      <h3>The clinician signs the order</h3>
+      <p class="who">The clinic's system asks the plan, before the order is sent, whether approval is needed.</p>
+      <button type="button" id="check">Check with the plan</button>
+      <div class="answer" id="answer-1" hidden aria-live="polite"></div>
+    </li>
+    <li class="step locked" id="step-2">
+      <h3>The clinic fills in the plan's form</h3>
+      <p class="who">The plan says what it needs to decide. The clinic's system fills in what it already knows from the record.</p>
+      <button type="button" id="form" disabled>Get the plan's form</button>
+      <div class="answer" id="answer-2" hidden aria-live="polite"></div>
+    </li>
+    <li class="step locked" id="step-3">
+      <h3>The clinic sends the request</h3>
+      <p class="who">The request goes to the plan with the answers and the assessment attached.</p>
+      <button type="button" id="send" disabled>Send the request</button>
+      <div class="answer" id="answer-3" hidden aria-live="polite"></div>
+    </li>
+    <li class="step locked" id="step-4">
+      <h3>A reviewer at the plan decides</h3>
+      <p class="who">A clinician at the plan reviews the request. The clinic's system checks back on its own.</p>
+      <div class="answer" id="answer-4" hidden aria-live="polite"></div>
+    </li>
+  </ol>
+</main>
+
+<script>
+  const $ = id => document.getElementById(id);
+  let reviewerPage = "http://localhost:5020/";
+  let polling = null;
+
+  fetch("/demo/setup").then(r => r.json()).then(s => { reviewerPage = s.reviewerPage; }).catch(() => {});
+
+  function el(tag, props = {}, ...children) {
+    const node = Object.assign(document.createElement(tag), props);
+    for (const child of children) if (child != null) node.append(child);
+    return node;
+  }
+
+  function technical(t) {
+    if (!t) return null;
+    if (typeof t === "string") return el("details", {}, el("summary", { textContent: "Technical detail" }), el("pre", { textContent: t }));
+    return el("details", {},
+      el("summary", { textContent: `Technical detail: ${t.what}` }),
+      el("h4", { textContent: `Sent to ${t.url}` }), el("pre", { textContent: t.sent }),
+      el("h4", { textContent: "The plan answered" }), el("pre", { textContent: t.received }));
+  }
+
+  function show(n, tone, verdict, extra = []) {
+    const box = $(`answer-${n}`);
+    box.className = `answer ${tone}`;
+    box.replaceChildren(el("p", { className: "verdict", textContent: verdict }), ...extra.filter(Boolean));
+    box.hidden = false;
+  }
+
+  function stage(n) {
+    for (let i = 1; i <= 4; i++) {
+      const step = $(`step-${i}`);
+      step.className = "step " + (i < n ? "done" : i === n ? "current" : "locked");
+    }
+    $("check").disabled = n !== 1;
+    $("form").disabled = n !== 2;
+    $("send").disabled = n !== 3;
+  }
+
+  async function call(path) {
+    try {
+      const response = await fetch(path, { method: "POST" });
+      return await response.json();
+    } catch {
+      return { ok: false, headline: "The clinic demo is not running. Start it and reload this page." };
+    }
+  }
+
+  function failed(n, result) {
+    show(n, "error", result.headline, [technical(result.technical)]);
+  }
+
+  $("check").addEventListener("click", async () => {
+    $("check").disabled = true;
+    const r = await call("/demo/check");
+    if (!r.ok) { $("check").disabled = false; return failed(1, r); }
+    const took = r.elapsedMs < 1000 ? "in under a second" : `in ${(r.elapsedMs / 1000).toFixed(1)} seconds`;
+    show(1, r.approvalNeeded ? "attention" : "yes", r.headline, [
+      el("p", { className: "speed", textContent: `The plan answered ${took}, while the clinician was still signing.` }),
+      r.detail ? el("p", { className: "detail", textContent: r.detail }) : null,
+      technical(r.technical),
+    ]);
+    if (r.approvalNeeded) stage(2);
+  });
+
+  $("form").addEventListener("click", async () => {
+    $("form").disabled = true;
+    const r = await call("/demo/form");
+    if (!r.ok) { $("form").disabled = false; return failed(2, r); }
+    const rows = r.questions.map(q => el("tr", {}, el("th", { scope: "row", textContent: q.text }), el("td", { textContent: q.answer })));
+    show(2, "form-answer", r.headline, [
+      r.detail ? el("p", { className: "detail", textContent: r.detail }) : null,
+      el("table", { className: "form" }, el("tbody", {}, ...rows)),
+      el("p", { className: "attached", textContent: `Attached: ${r.documents.join(", ")}` }),
+      technical(r.technical),
+    ]);
+    stage(3);
+  });
+
+  $("send").addEventListener("click", async () => {
+    $("send").disabled = true;
+    const r = await call("/demo/send");
+    if (!r.ok) { $("send").disabled = false; return failed(3, r); }
+    show(3, "yes", "Sent", [
+      el("p", { className: "detail", textContent: `The plan received request ${r.requestNumber} and put it in its review queue.` }),
+      el("p", { className: "detail" }, el("a", { href: reviewerPage, target: "_blank", rel: "noopener", textContent: "Open the plan's reviewer page" }), " to approve or deny it."),
+      technical(r.technical),
+    ]);
+    stage(4);
+    decision(r);
+    polling = setInterval(checkBack, 4000);
+  });
+
+  async function checkBack() {
+    const r = await call("/demo/status");
+    if (!r.ok) return failed(4, r);
+    decision(r);
+  }
+
+  function decision(r) {
+    const finished = ["approved", "denied", "not-required"].includes(r.status);
+    const tone = { approved: "yes", "not-required": "yes", denied: "no", info: "attention" }[r.status] || "";
+    const extra = [];
+    if (!finished) extra.push(el("p", { className: "speed" }, el("span", { className: "waiting-dot", ariaHidden: "true" }), "Checking with the plan every few seconds"));
+    extra.push(el("p", { className: "detail", textContent: r.detail }));
+    if (r.authorizationNumber) extra.push(el("p", { className: "detail", textContent: `Authorization number: ${r.authorizationNumber}` }));
+    extra.push(technical(r.technical));
+    show(4, tone, r.headline, extra);
+    if (finished) {
+      clearInterval(polling); polling = null;
+      $("step-4").className = "step done";
+    }
+  }
+
+  $("restart").addEventListener("click", async () => {
+    clearInterval(polling); polling = null;
+    await call("/demo/reset");
+    for (let i = 1; i <= 4; i++) $(`answer-${i}`).hidden = true;
+    stage(1);
+  });
+</script>
+</body>
+</html>

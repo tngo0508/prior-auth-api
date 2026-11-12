@@ -59,6 +59,22 @@ In a second terminal, act as a provider's system. It asks about an order, downlo
 dotnet run --project samples/PriorAuth.SampleClient -- http://localhost:5020
 ```
 
+### Demo for management
+
+The clinic demo shows the same journey in a browser, in plain words, for people who are not developers. With the service running as above, start it in a second terminal and open http://localhost:5030:
+
+```bash
+dotnet run --project samples/PriorAuth.ClinicDemo
+```
+
+1. Put the clinic demo and the reviewer queue (http://localhost:5020) side by side.
+2. **Check with the plan.** The plan answers "Approval needed" for therapeutic behavioral services (TBS) in under a second.
+3. **Get the plan's form.** The plan's questions appear, already answered from the clinic's record.
+4. **Send the request.** It appears in the reviewer queue.
+5. In the queue, enter a reviewer name and an end date, and approve it (or deny it with a reason). Within a few seconds the clinic demo shows the decision and the authorization number.
+
+**Start again** begins a new request. Each step has a closed "Technical detail" section for questions about what was sent. The demo must run on the same machine as the service, because it registers itself as a provider system the way agency staff would.
+
 Run the tests:
 
 ```bash
@@ -100,6 +116,7 @@ For developers of provider systems, the running service also serves a guide at `
 | [src/PriorAuth.Api](src/PriorAuth.Api) | The service |
 | [tests/PriorAuth.Api.Tests](tests/PriorAuth.Api.Tests) | 190 automated tests, almost all starting the real app; they run on SQLite or SQL Server |
 | [samples/PriorAuth.SampleClient](samples/PriorAuth.SampleClient) | A sample provider client |
+| [samples/PriorAuth.ClinicDemo](samples/PriorAuth.ClinicDemo) | A browser demo of one request, in plain words, for management |
 | [prototype/PriorAuth.Prototype](prototype/PriorAuth.Prototype) | Throwaway learning prototype, not part of the service |
 | [docs](docs) | Documentation, diagrams and screenshots |
 
