@@ -55,6 +55,12 @@
   main.wrap { padding-top: 28px; padding-bottom: 48px; }
   .nowrap { white-space: nowrap; }
   .spaced { margin-top: 28px; } .spaced-sm { margin-top: 14px; margin-bottom: 0; }
+  details.help { background: var(--soft); border-radius: 8px; padding: 12px 16px; margin: 0 0 16px; }
+  details.help summary { cursor: pointer; font-weight: 600; color: var(--accent); }
+  details.help[open] summary { margin-bottom: 8px; }
+  details.help p, details.help li { max-width: 72ch; }
+  details.help ol { padding-left: 20px; } details.help li { margin-bottom: 10px; }
+  details.help .message { margin: 8px 0; font-size: 14px; background: var(--surface); min-height: 0; }
   .table-card.whole { border-top: 1px solid var(--line); border-radius: var(--radius); }
   h1 { font-size: 24px; line-height: 1.25; margin: 0 0 4px; letter-spacing: -.01em; }
   h2 { font-size: 16px; margin: 0 0 12px; }

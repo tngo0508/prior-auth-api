@@ -115,6 +115,37 @@ public class PortalTests(ApiFactory factory) : IClassFixture<ApiFactory>, IAsync
     }
 
     [Fact]
+    public async Task The_register_form_explains_where_the_public_key_comes_from_with_a_message_to_send()
+    {
+        var page = await factory.SignedInAs(ApiFactory.AdminAccount).GetStringAsync("/providers");
+
+        Assert.Contains("How do I get the public key?", page);
+        Assert.Contains("never the private key", page);
+        Assert.Contains("http://localhost/developers.html", page);
+    }
+
+    [Fact]
+    public async Task A_pasted_private_key_is_refused_in_plain_words()
+    {
+        var admin = factory.SignedInAs(ApiFactory.AdminAccount);
+        var page = await admin.GetStringAsync("/providers");
+        var token = Regex.Match(page, "name=\"__RequestVerificationToken\" type=\"hidden\" value=\"([^\"]+)\"").Groups[1].Value;
+        using var key = System.Security.Cryptography.ECDsa.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP384);
+        var p = key.ExportParameters(includePrivateParameters: true);
+        string B64(byte[] bytes) => Microsoft.IdentityModel.Tokens.Base64UrlEncoder.Encode(bytes);
+        var withPrivate = $$"""{"keys":[{"kty":"EC","crv":"P-384","kid":"k1","x":"{{B64(p.Q.X!)}}","y":"{{B64(p.Q.Y!)}}","d":"{{B64(p.D!)}}"}]}""";
+
+        var response = await admin.PostAsync("/providers?handler=Register", new FormUrlEncodedContent(
+            [new("__RequestVerificationToken", token), new("Name", "Wrong Half Clinic (synthetic)"), new("Jwks", withPrivate)]));
+        var answer = await response.Content.ReadAsStringAsync();
+
+        Assert.Contains("This is a private key", answer);
+        Assert.Contains("send only the public key", answer);
+        Assert.DoesNotContain("Wrong Half Clinic (synthetic)</td>", answer);
+        Assert.DoesNotContain(B64(p.D!), answer);
+    }
+
+    [Fact]
     public async Task A_provider_system_can_be_registered_with_a_contact_email_and_a_bad_one_is_refused()
     {
         var admin = factory.SignedInAs(ApiFactory.AdminAccount);
