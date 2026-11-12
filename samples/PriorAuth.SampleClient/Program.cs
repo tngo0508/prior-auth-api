@@ -1,4 +1,4 @@
-// A sample of what a provider's system does to use the Prior Authorization API.
+﻿// A sample of what a provider's system does to use the Prior Authorization API.
 // It is a teaching aid and a reference for providers' developers. Synthetic data only.
 //
 //   dotnet run --project samples/PriorAuth.SampleClient -- http://localhost:5020
@@ -32,7 +32,10 @@ Step(1, "Created a key pair. Only the public half is shared.");
 
 // 2. Agency staff register the provider's public key. In real life this is a one-time onboarding
 //    step done by the agency, not by the provider's software. It only works from the server's own machine.
-var registration = await http.PostAsJsonAsync("/internal/clients", new { name = "Sample Clinic (synthetic)", jwks = publicKeySet });
+//    The internal endpoints refuse changes that do not carry the reviewer page's header.
+var registrationCall = new HttpRequestMessage(HttpMethod.Post, "/internal/clients") { Content = JsonContent.Create(new { name = "Sample Clinic (synthetic)", jwks = publicKeySet }) };
+registrationCall.Headers.Add("X-Requested-By", "prior-auth-reviewer");
+var registration = await http.SendAsync(registrationCall);
 registration.EnsureSuccessStatusCode();
 var clientId = (await registration.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("clientId").GetString()!;
 Step(2, $"Registered. The agency issued client id {clientId}.");
@@ -52,8 +55,10 @@ var hookCall = new HttpRequestMessage(HttpMethod.Post, hookUrl)
             "patientId": "synthetic-1",
             "draftOrders": { "resourceType": "Bundle", "type": "collection", "entry": [{ "resource": {
               "resourceType": "ServiceRequest", "id": "order-1", "status": "draft", "intent": "order",
-              "code": { "coding": [{ "code": "{{serviceCode}}" }] },
+              "code": { "coding": [{ "system": "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets", "code": "{{serviceCode}}" }] },
               "subject": { "reference": "Patient/synthetic-1" },
+              "authoredOn": "{{Today():yyyy-MM-dd}}",
+              "requester": { "reference": "Practitioner/synthetic-1" },
               "insurance": [{ "reference": "Coverage/synthetic-1" }] } }] }
           }
         }
@@ -63,7 +68,9 @@ hookCall.Headers.Authorization = new AuthenticationHeaderValue("Bearer", SignedS
 var hookResponse = await http.SendAsync(hookCall);
 hookResponse.EnsureSuccessStatusCode();
 var coverageInformation = (await hookResponse.Content.ReadFromJsonAsync<JsonElement>())
-    .GetProperty("systemActions")[0].GetProperty("resource").GetProperty("extension")[0].GetProperty("extension");
+    .GetProperty("systemActions")[0].GetProperty("resource").GetProperty("extension").EnumerateArray()
+    .First(e => e.GetProperty("url").GetString() == "http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information")
+    .GetProperty("extension");
 var paNeeded = Part(coverageInformation, "pa-needed", "valueCode");
 var questionnaireUrl = Part(coverageInformation, "questionnaire", "valueCanonical");
 Step(3, $"Asked about {serviceCode}. The plan says: prior authorization \"{paNeeded}\", questionnaire {questionnaireUrl}.");
@@ -95,7 +102,7 @@ foreach (var item in questionnaire.GetProperty("item").EnumerateArray())
     Console.WriteLine($"     - {item.GetProperty("text").GetString()} ({item.GetProperty("type").GetString()}{(item.GetProperty("required").GetBoolean() ? ", required" : "")})");
 
 // 6. PAS: submit the request with the answers and one document. In real life a clinician fills in the answers.
-var requestId = $"SAMPLE-{DateTime.UtcNow:yyyyMMdd-HHmmss}";
+var requestId = $"SAMPLE-{DateTime.Now:yyyyMMdd-HHmmss}";
 var submitted = await PostFhir("/fhir/Claim/$submit", RequestBundle(requestId, serviceCode, questionnaireUrl!));
 Step(6, $"Submitted {requestId} with answers and a document. {Describe(submitted)}");
 
@@ -108,6 +115,9 @@ Step(7, $"Status of {requestId}. {Describe(await PostFhir("/fhir/Claim/$inquire"
 return;
 
 static void Step(int number, string text) => Console.WriteLine($"{number}. {text}");
+
+// Dates on requests are the clinic's local calendar date, not the UTC date.
+static DateTime Today() => DateTime.Now.Date;
 
 static string? Part(JsonElement extensions, string url, string valueName) =>
     extensions.EnumerateArray().FirstOrDefault(e => e.GetProperty("url").GetString() == url) is { ValueKind: JsonValueKind.Object } found
@@ -132,8 +142,9 @@ string SignedStatement(string audience, bool includeSubject)
 async Task<JsonElement> PostFhir(string path, string json)
 {
     var response = await http.PostAsync(path, new StringContent(json, Encoding.UTF8, "application/fhir+json"));
-    var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-    if (!response.IsSuccessStatusCode) throw new InvalidOperationException($"{path} answered {(int)response.StatusCode}: {body}");
+    var text = await response.Content.ReadAsStringAsync();
+    if (!response.IsSuccessStatusCode) throw new InvalidOperationException($"{path} answered {(int)response.StatusCode}: {text}");
+    var body = JsonDocument.Parse(text).RootElement;
     return body.GetProperty("entry")[0].GetProperty("resource");
 }
 
@@ -159,17 +170,17 @@ static string RequestBundle(string requestId, string code, string questionnaireU
             "type": { "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/claim-type", "code": "professional" }] },
             "use": "preauthorization",
             "patient": { "reference": "urn:uuid:22222222-2222-2222-2222-222222222222" },
-            "created": "{{DateTime.UtcNow:yyyy-MM-dd}}",
+            "created": "{{Today():yyyy-MM-dd}}",
             "insurer": { "display": "County Behavioral Health Plan (synthetic)" },
             "provider": { "display": "Sample Clinic (synthetic)" },
             "priority": { "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/processpriority", "code": "normal" }] },
             "insurance": [{ "sequence": 1, "focal": true, "coverage": { "display": "Synthetic coverage" } }],
-            "item": [{ "sequence": 1, "productOrService": { "coding": [{ "code": "{{code}}" }] } }]
+            "item": [{ "sequence": 1, "productOrService": { "coding": [{ "system": "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets", "code": "{{code}}" }] } }]
           }
         },
         {
           "fullUrl": "urn:uuid:22222222-2222-2222-2222-222222222222",
-          "resource": { "resourceType": "Patient", "name": [{ "family": "Testpatient", "given": ["Alex"] }] }
+          "resource": { "resourceType": "Patient", "identifier": [{ "system": "http://example.org/member-id", "value": "SYN-0001" }], "name": [{ "family": "Testpatient", "given": ["Alex"] }] }
         },
         {
           "fullUrl": "urn:uuid:33333333-3333-3333-3333-333333333333",
@@ -189,7 +200,7 @@ static string RequestBundle(string requestId, string code, string questionnaireU
               { "linkId": "assessment-date", "answer": [{ "valueDate": "2026-10-30" }] },
               { "linkId": "target-behaviours", "answer": [{ "valueString": "Synthetic example: elopement and aggression at school." }] },
               { "linkId": "placement-risk", "answer": [{ "valueBoolean": true }] },
-              { "linkId": "hours-per-week", "answer": [{ "valueCoding": { "code": "11-to-20", "display": "11 to 20" } }] }
+              { "linkId": "hours-per-week", "answer": [{ "valueCoding": { "system": "{{questionnaireUrl.Split("/fhir/")[0]}}/fhir/CodeSystem/prior-auth-answers", "code": "11-to-20", "display": "11 to 20" } }] }
             ]
           }
         }

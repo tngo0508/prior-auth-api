@@ -31,9 +31,9 @@ flowchart LR
     Q3 <--> REV
 ```
 
-1. **Does this service need approval?** The EHR asks about a service code and the API says yes or no.
+1. **Does this service need approval?** The EHR asks about a service code, together with its code system (HCPCS or CPT), and the API says yes or no.
 2. **What paperwork is required?** For a service that does need approval, the API lists the documentation the plan wants.
-3. **Here is my request; what is your answer?** The API replies with one of three answers: approved (with an end date), denied (with a specific reason), or more information needed.
+3. **Here is my request; what is your answer?** Each request is for one service. The API replies with one of three answers: approved (with an end date), denied (with a specific reason), or more information needed.
 
 The API does not change who decides. A clinician at the agency reviews every request. The API carries the request in and the decision out.
 
@@ -43,7 +43,7 @@ The API does not change who decides. A clinician at the agency reviews every req
 |---|---|---|
 | 1. Is approval needed? | Da Vinci CRD (Coverage Requirements Discovery) | CDS Hooks services at `/cds-services`, and a simple list at `GET /requirements` |
 | 2. What documents? | Da Vinci DTR (Documentation Templates and Rules) | A questionnaire per service at `POST /fhir/Questionnaire/$questionnaire-package` |
-| 3. Request and answer | Da Vinci PAS (Prior Authorization Support) | `POST /fhir/Claim/$submit` and `POST /fhir/Claim/$inquire` |
+| 3. Request and answer | Da Vinci PAS (Prior Authorization Support) | `POST /fhir/Claim/$submit`, `POST /fhir/Claim/$inquire` and `GET /fhir/ClaimResponse/{id}` |
 
 All three sit on **FHIR R4**, the healthcare data format. In C# the [Firely SDK](https://github.com/FirelyTeam/firely-net-sdk) reads and writes it.
 
@@ -56,7 +56,8 @@ The rule requires the three functions and FHIR. The Da Vinci guides are the reco
 | `Bundle` | An envelope holding several records sent together. |
 | `Claim` with `use = preauthorization` | The authorization request. FHIR reuses its claim record for this. |
 | `ClaimResponse` | The plan's answer. |
-| `OperationOutcome` | An error message. |
+| `OperationOutcome` | An error message. Every error from `/fhir` comes back as one, including sign-in errors. |
+| Code system | Which code list a service code comes from: HCPCS (`http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets`) or CPT (`http://www.ama-assn.org/go/cpt`). A code only matches the plan's list when its system matches too. |
 | `CapabilityStatement` | The server's description of what it supports, at `/fhir/metadata`. |
 | Review action code `A1` | Approved ("certified in total"). |
 | Review action code `A3` | Denied ("not certified"). |

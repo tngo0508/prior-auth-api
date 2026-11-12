@@ -1,7 +1,8 @@
-{
+﻿{
   "_comment": "PLACEHOLDER DATA. The real list, documentation rules and questions must be supplied and signed off by the plan's utilization management staff (GitHub issue #1).",
   "ServiceRequirements": [
     {
+      "System": "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets",
       "Code": "H2019",
       "Name": "Therapeutic Behavioral Services",
       "Program": "SMHS",
@@ -15,6 +16,7 @@
       ]
     },
     {
+      "System": "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets",
       "Code": "H2012",
       "Name": "Day Treatment Intensive / Day Rehabilitation",
       "Program": "SMHS",
@@ -27,6 +29,7 @@
       ]
     },
     {
+      "System": "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets",
       "Code": "S5145",
       "Name": "Therapeutic Foster Care",
       "Program": "SMHS",
@@ -38,6 +41,7 @@
       ]
     },
     {
+      "System": "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets",
       "Code": "H0019",
       "Name": "Residential Treatment",
       "Program": "DMC-ODS",

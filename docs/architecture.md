@@ -63,6 +63,7 @@ flowchart TB
 
     subgraph APP["PriorAuth.Api  (ASP.NET Core on .NET 10, one process)"]
         direction TB
+        BOUNDARY["Server rules (Program.cs)<br/>host filter, FHIR JSON only, size limit,<br/>security headers, no-store, errors as OperationOutcome"]
         subgraph EDGE["Endpoints"]
             AUTHN["Auth<br/>token endpoint, registration"]
             CRD["Crd<br/>CDS Hooks services"]
@@ -70,11 +71,13 @@ flowchart TB
             PAS["Fhir<br/>submit, inquire, read"]
             REVIEW["Review<br/>queue and decisions"]
             STATIC["wwwroot<br/>reviewer page, developer guide"]
+            HEALTH["/health<br/>database check"]
         end
         subgraph CORE["Core"]
             MAP["PasMapper, QuestionnaireBuilder<br/>FHIR to domain and back"]
             DOMAIN["Domain<br/>AuthorizationRequest: states and rules"]
-            CATALOG["ServiceRequirementCatalog"]
+            CATALOG["ServiceRequirementCatalog<br/>checked at start-up"]
+            CLOCK["PlanClock<br/>the plan's local date"]
         end
         DATA["Data<br/>Entity Framework Core"]
     end
@@ -82,12 +85,12 @@ flowchart TB
     CFG["service-requirements.json"]
     DB[("Database<br/>SQLite in development,<br/>SQL Server in production")]
 
-    EHR --> AUTHN
-    EHR --> CRD
-    EHR --> DTR
-    EHR --> PAS
-    BROWSER --> STATIC
-    BROWSER --> REVIEW
+    EHR --> BOUNDARY
+    BROWSER --> BOUNDARY
+    BOUNDARY --> EDGE
+    REVIEW --> CLOCK
+    CRD --> CLOCK
+    HEALTH --> DATA
     CRD --> CATALOG
     DTR --> CATALOG
     PAS --> MAP
@@ -105,7 +108,7 @@ The code is organized by what each part is for:
 
 | Folder | Responsibility | Depends on |
 |---|---|---|
-| [Domain](../src/PriorAuth.Api/Domain) | The authorization request, its states and every business rule. Knows nothing about FHIR, HTTP or the database. | Nothing |
+| [Domain](../src/PriorAuth.Api/Domain) | The authorization request, its states and every business rule; the service list and its start-up checks; the plan's calendar. Knows nothing about HTTP or the database (the service list reads FHIR codings to match a code). | Nothing |
 | [Fhir](../src/PriorAuth.Api/Fhir) | PAS endpoints, reading and writing FHIR JSON, translating between FHIR and the domain | Domain, Data, Auth |
 | [Crd](../src/PriorAuth.Api/Crd) | CDS Hooks discovery and the two order services | Domain, Auth, Dtr |
 | [Dtr](../src/PriorAuth.Api/Dtr) | Builds questionnaires from the service list and serves them | Domain, Auth |
@@ -120,7 +123,7 @@ Other projects in the repository:
 
 | Project | Purpose |
 |---|---|
-| [tests/PriorAuth.Api.Tests](../tests/PriorAuth.Api.Tests) | 65 integration tests that start the real app and call it over HTTP |
+| [tests/PriorAuth.Api.Tests](../tests/PriorAuth.Api.Tests) | 190 automated tests; nearly all start the real app and call it over HTTP, on SQLite or SQL Server |
 | [samples/PriorAuth.SampleClient](../samples/PriorAuth.SampleClient) | A console program that behaves like a provider system, end to end |
 | [prototype/PriorAuth.Prototype](../prototype/PriorAuth.Prototype) | The original throwaway learning prototype. Not part of the service. |
 
@@ -145,10 +148,12 @@ sequenceDiagram
     API-->>EHR: Pended
     REV->>API: Open queue, read answers and documents
     REV->>API: Approve, deny, or ask for information
-    API->>DB: Store decision and history
+    API->>DB: Store decision and history, only if the version is unchanged
     EHR->>API: What is the status? (PAS)
     API-->>EHR: Approved with end date, denied with reason, or what is missing
 ```
+
+A request is known by the provider system that sent it plus the system and value of its identifier. Sending the same identifier again returns the current answer; reusing it for another member or service is refused with 422. Asking about an identifier that matches nothing returns an empty result, not an error. Two people acting on one request at the same moment cannot both win: the second gets 409 and must reload.
 
 A request is always in one of five states:
 
@@ -167,7 +172,7 @@ stateDiagram-v2
     NotRequired --> [*]
 ```
 
-The provider learns the decision by asking. The system does not push notifications. Details: [How it works](02-how-it-works.md) and [CRD and DTR](06-crd-and-dtr.md).
+The provider learns the decision by asking. The system does not push notifications; reading a response by id returns an `ETag`, so asking again with `If-None-Match` costs a 304 until something changes. Details: [How it works](02-how-it-works.md) and [CRD and DTR](06-crd-and-dtr.md).
 
 ## 5. What is stored
 
@@ -176,6 +181,7 @@ erDiagram
     ProviderClient ||--o{ AuthorizationRequest : submits
     AuthorizationRequest ||--o{ HistoryEntry : has
     AuthorizationRequest ||--o{ SupportingDocument : has
+    AuthorizationRequest ||--o{ ReceivedBundle : "keeps resends"
     ProviderClient {
         string ClientId PK
         string Name
@@ -184,16 +190,21 @@ erDiagram
     }
     AuthorizationRequest {
         string Id PK
-        string ClientId FK
+        string ClientId FK "unique with the two below"
+        string ProviderRequestSystem
         string ProviderRequestId
         string MemberName
+        string MemberIdentifier
+        string ServiceSystem
         string ServiceCode
         string Status
         string AuthorizationNumber
         date AuthorizedThrough
         string Reason
         string DecidedBy
-        string SubmittedBundleJson "the original FHIR message"
+        string SubmittedBundleJson "first FHIR message, documents removed"
+        datetime LastChangedAtUtc
+        int Version "concurrency check"
     }
     HistoryEntry {
         int Id PK
@@ -207,13 +218,21 @@ erDiagram
         string ContentType
         bytes Data
         int SizeBytes
+        string Sha256
+    }
+    ReceivedBundle {
+        int Id PK
+        string Json "later FHIR message, documents removed"
+        string Sha256
+        datetime ReceivedAtUtc
     }
 ```
 
 | What | Where | Notes |
 |---|---|---|
 | Requests, decisions, history, documents, registered provider systems | The database | Member information is in here. It is protected health information in real use. |
-| The original FHIR message of each request | A column on the request | Kept as received, as a record and so responses can echo the right references |
+| The original FHIR message of each request | A column on the request | Kept as a record and so responses can echo the right references. Document contents are removed, because each document is stored once on its own. |
+| Later FHIR messages sent under the same identifier | `ReceivedBundle` table | Each different one kept once, for the record |
 | The service list, paperwork and questions | `service-requirements.json` | Loaded at start-up. A change needs a restart. |
 | Access-token signing key | Memory | Created at start-up, lost on restart |
 | Record of sign-in statements already used | Memory | Per process |
@@ -230,11 +249,13 @@ flowchart LR
         P3["/cds-services"]
         P4["/requirements"]
         P5["/developers.html"]
+        P6["/health"]
+        P7["/auth/authorize (always 400)"]
     end
     subgraph TOKEN["Access token and scope"]
         T1["/fhir/Claim/$submit, $inquire"]
         T2["/fhir/ClaimResponse/{id}"]
-        T3["/fhir/Questionnaire/..."]
+        T3["/fhir/Questionnaire/...<br/>/fhir/ValueSet/$expand"]
     end
     subgraph JWT["Signed statement per call"]
         J1["/cds-services/{id}"]
@@ -251,14 +272,16 @@ flowchart LR
 | No sign-in | Open to anyone | These only describe the server or plan policy. No member data. |
 | Access token | A five-minute token from `/auth/token`, carrying the right scope | Standard SMART Backend Services |
 | Signed statement | A short statement signed with the provider system's private key, made for that exact address, used once | How sign-in itself works, and what CDS Hooks requires on each call |
-| Same machine only | Answers only callers on the server itself | A stopgap. Staff sign-in is not built. |
+| Same machine only | Answers only callers on the server itself, not forwarded by a proxy, addressed to `localhost`; changes also need the reviewer page's `X-Requested-By` header | A stopgap. Staff sign-in is not built. |
 
-Four controls matter most:
+The controls that matter most:
 
-- **No shared secrets.** A provider system proves itself with a private key it never sends. The plan stores public keys only, and refuses a registration that contains a private key.
-- **Each provider system sees only its own requests.** Another provider's request is reported as "not found".
+- **No shared secrets.** A provider system proves itself with a private key it never sends. The plan stores public keys only (RSA of at least 2048 bits or EC P-384, each with its own `kid`), and refuses a registration that contains a private or symmetric key.
+- **A switched-off provider is out at once.** A deactivated client's existing tokens are refused on the next call.
+- **Each provider system sees only its own requests.** Another provider's request is reported as not found.
 - **The recorded provider name is the registered one**, not the name a request claims.
-- **Uploaded files are restricted.** Only PDF, JPEG, PNG, TIFF and plain text, up to 5 MB each, always served to reviewers as a download.
+- **Uploaded files are restricted.** Only PDF, JPEG, PNG, TIFF and plain text, up to 5 MB each and 10 per request, always served to reviewers as a download.
+- **The server boundary is narrow.** Only the configured host names are answered (`AllowedHosts`). The FHIR API refuses non-JSON with 406 or 415. Every response carries a Content Security Policy, `X-Frame-Options: DENY`, `nosniff` and `no-referrer`; responses that can hold member data are marked `no-store`. Errors from `/fhir` are `OperationOutcome` resources with no internal detail.
 
 Details: [Sign-in for provider systems](05-sign-in.md).
 
@@ -302,9 +325,12 @@ Everything in the second diagram except the application and SQL Server support i
 |---|---|
 | `Database:Provider` | `Sqlite` or `SqlServer` |
 | `ConnectionStrings:PriorAuth` | The database connection |
-| `Auth:PublicBaseUrl` | The public address, needed behind a proxy so that token audiences and questionnaire addresses are correct |
+| `Auth:PublicBaseUrl` | The public https address. Token audiences and published addresses use it, never the caller's `Host` header. Outside Development the application will not start without it. |
+| `AllowedHosts` | The host names the server answers to. The default is `localhost;127.0.0.1;[::1]`, so a deployment must set its public host name or every outside request is refused. |
+| `Plan:TimeZone` | The plan's time zone for "today" (default `America/Los_Angeles`). An unknown zone stops start-up. |
+| `Plan:Name` | The plan name shown on CRD cards |
 
-On SQL Server the application applies its migrations when it starts.
+On SQL Server the application applies its migrations when it starts. It also refuses to start if `service-requirements.json` has a mistake. `GET /health` reports whether the database answers, for the hosting platform's monitoring.
 
 ## 9. Decisions and their consequences
 
@@ -316,24 +342,33 @@ On SQL Server the application applies its migrations when it starts.
 | One application, one database | Easy to run and reason about. It cannot yet run as more than one instance. |
 | Service list in a file, not a database | Policy staff can change it without code, but a change needs a restart and there is no editing screen or change history beyond version control. |
 | Documents stored in the database | Simple and transactional. Large volumes would be better in file or blob storage. |
-| Provider systems pull; nothing is pushed | No outbound connections to providers to secure. Decisions are not delivered until asked for. |
+| Provider systems pull; nothing is pushed | No outbound connections to providers to secure. Decisions are not delivered until asked for. Subscriptions are deliberately not built. |
+| One service per request | A Claim with several lines is refused rather than half reviewed. Providers send one request per service. |
+| Optimistic concurrency on each request | No locks are held while a reviewer reads. A decision made on an out-of-date copy is refused with 409. |
+| Dates in the plan's time zone | Approvals, authorization numbers and CRD answers use the local date. Exact moments are still stored in UTC. |
 
 ## 10. What is not built
 
-These are the gaps that matter at the level of architecture. The full list with issue links is in [Status and open questions](04-status-and-open-questions.md).
+These are the gaps that matter at the level of architecture. The full list with issue links is in [Status and open questions](04-status-and-open-questions.md), and the audit of 2026-11-11 against the CMS Prior Authorization API workflow is in [7. November 2026 audit](07-audit-2026-11.md).
 
 | Gap | Effect |
 |---|---|
 | Staff sign-in | Reviewers and registration staff are not identified. The system must not hold real data until this exists. |
+| Audit log of access | Who read which request is not logged for review. |
 | Eligibility | The system does not know whether a member is enrolled. |
-| Conformance testing | No validator or Inferno run has been made. Interoperability with a real EHR is unproven. |
+| Conformance testing | Response Bundles were checked once with a validator during the audit, but no validator runs in the build and no Inferno run has been made. US Core / USCDI conformance of incoming resources is not checked. Interoperability with a real EHR is unproven. |
 | Automatic answers in questionnaires | A person types every answer. |
-| Hosting, TLS, backups, monitoring, audit log export | Nothing is deployed. |
+| Hosting, TLS, backups, monitoring, audit log export | Nothing is deployed. A `/health` check exists. |
 | Malware scanning of uploads | Files are restricted by type and size only. |
-| More than one server instance | Signing key and replay memory are per process. |
-| Decision timeframes | The rule sets 72 hours for expedited and 7 days for standard requests. Nothing tracks or warns on these. |
+| More than one server instance | The token signing key is created at start-up and the replay memory is per process. |
+| Decision timeframes and priority | The rule sets 72 hours for expedited and 7 days for standard requests. Priority is not recorded, and nothing tracks or warns on these. |
 | Public metrics and DHCS reporting | Not produced. |
-| Patient Access API | Prior authorization data is not shared with it. |
+| Appeals | Not recorded; a denial is final in this system. |
+| Partial approval and coded denial reasons | A request is approved or denied whole, with a free-text reason. |
+| PAS update and cancel | Not supported; such a request is refused. |
+| Patient Access and Provider Access APIs | Prior authorization data is not shared with them. |
+| 42 CFR Part 2 | Substance use disorder records get no special consent or redisclosure handling. |
+| CORS | Not enabled; browser-based provider applications cannot call the API directly. |
 | Real service list | The four services and their questions are invented placeholders. |
 
 ## Where to go next
@@ -346,3 +381,4 @@ These are the gaps that matter at the level of architecture. The full list with 
 | What is done, missing and assumed | [4. Status and open questions](04-status-and-open-questions.md) |
 | Sign-in | [5. Sign-in for provider systems](05-sign-in.md) |
 | CRD and DTR | [6. Asking first: CRD and DTR](06-crd-and-dtr.md) |
+| What the November 2026 audit found | [7. November 2026 audit](07-audit-2026-11.md) |

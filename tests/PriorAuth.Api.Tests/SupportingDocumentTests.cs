@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
@@ -123,30 +123,8 @@ public class SupportingDocumentTests(ApiFactory factory) : IClassFixture<ApiFact
     }
 
     private async Task<JsonElement> QueueEntry(string id) =>
-        (await _staff.GetFromJsonAsync<JsonElement>("/internal/requests")).EnumerateArray().Single(r => r.GetProperty("id").GetString() == id);
+        (await _staff.GetFromJsonAsync<JsonElement>("/internal/requests?status=all&take=200")).EnumerateArray().Single(r => r.GetProperty("id").GetString() == id);
 
-    private static string RequestBundle(string requestId, string[] documentEntries) => $$"""
-        {
-          "resourceType": "Bundle",
-          "type": "collection",
-          "entry": [
-            {
-              "resource": {
-                "resourceType": "Claim",
-                "identifier": [{ "value": "{{requestId}}" }],
-                "status": "active",
-                "type": { "coding": [{ "code": "professional" }] },
-                "use": "preauthorization",
-                "patient": { "display": "Synthetic Patient" },
-                "created": "2026-11-11",
-                "insurer": { "display": "County Behavioral Health Plan (synthetic)" },
-                "provider": { "display": "Example Clinic (synthetic)" },
-                "priority": { "coding": [{ "code": "normal" }] },
-                "insurance": [{ "sequence": 1, "focal": true, "coverage": { "display": "Synthetic coverage" } }],
-                "item": [{ "sequence": 1, "productOrService": { "coding": [{ "code": "H2019" }] } }]
-              }
-            }{{string.Concat(documentEntries.Select(d => "," + d))}}
-          ]
-        }
-        """;
+    private static string RequestBundle(string requestId, string[] documentEntries) =>
+        PasFixtures.RequestBundle(requestId, extraEntries: documentEntries);
 }

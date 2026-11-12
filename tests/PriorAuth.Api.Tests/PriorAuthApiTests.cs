@@ -1,7 +1,8 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
@@ -22,8 +23,22 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
 
     private string SqlitePath => Path.Combine(Path.GetTempPath(), _name + ".db");
 
+    /// <summary>A test sets this header to make its request look as if it came from another machine.</summary>
+    public const string RemoteAddressHeader = "X-Test-Remote-Address";
+
+    protected override void ConfigureClient(HttpClient client)
+    {
+        base.ConfigureClient(client);
+        // The reviewer page sends this on every internal change; the test clients act as that page.
+        client.DefaultRequestHeaders.Add(PriorAuth.Api.Auth.AuthSetup.InternalRequestHeader, PriorAuth.Api.Auth.AuthSetup.InternalRequestHeaderValue);
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        // The in-memory test server has no network connection, so it has no remote address. Give it the loopback
+        // address a caller on this machine would have, unless the test asks to look like a remote caller.
+        builder.ConfigureServices(services => services.AddTransient<Microsoft.AspNetCore.Hosting.IStartupFilter, TestRemoteAddress>());
+
         if (SqlServer is null)
         {
             builder.UseSetting("ConnectionStrings:PriorAuth", $"Data Source={SqlitePath};Pooling=False");
@@ -46,6 +61,20 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
         base.Dispose(disposing);
         if (File.Exists(SqlitePath)) File.Delete(SqlitePath);
     }
+}
+
+internal sealed class TestRemoteAddress : Microsoft.AspNetCore.Hosting.IStartupFilter
+{
+    public Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> Configure(Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> next) => app =>
+    {
+        app.Use(async (context, nextMiddleware) =>
+        {
+            var pretend = context.Request.Headers[ApiFactory.RemoteAddressHeader].ToString();
+            context.Connection.RemoteIpAddress = pretend.Length > 0 ? IPAddress.Parse(pretend) : context.Connection.RemoteIpAddress ?? IPAddress.Loopback;
+            await nextMiddleware();
+        });
+        next(app);
+    };
 }
 
 public class PriorAuthApiTests(ApiFactory factory) : IClassFixture<ApiFactory>, IAsyncLifetime
@@ -147,7 +176,8 @@ public class PriorAuthApiTests(ApiFactory factory) : IClassFixture<ApiFactory>, 
 
         var bundle = await (await _client.PostAsync("/fhir/Claim/$inquire", Fhir(RequestBundle(requestId, "H2019")))).Content.ReadFromJsonAsync<JsonElement>();
         var claimResponse = bundle.GetProperty("entry")[0].GetProperty("resource");
-        var communication = bundle.GetProperty("entry")[1];
+        var communication = bundle.GetProperty("entry").EnumerateArray()
+            .Single(e => e.GetProperty("resource").GetProperty("resourceType").GetString() == "CommunicationRequest");
 
         Assert.Equal("CommunicationRequest", communication.GetProperty("resource").GetProperty("resourceType").GetString());
         Assert.Equal("Client plan", communication.GetProperty("resource").GetProperty("payload")[0].GetProperty("contentString").GetString());
@@ -161,7 +191,7 @@ public class PriorAuthApiTests(ApiFactory factory) : IClassFixture<ApiFactory>, 
     {
         var requestId = NewRequestId();
         var id = (await Submit(requestId, "H2019")).GetProperty("id").GetString()!;
-        var through = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(90);
+        var through = PlanToday().AddDays(90);
 
         var decision = await _client.PostAsJsonAsync($"/internal/requests/{id}/approve", new { through, reviewer = "Test Reviewer" });
         var status = await Inquire(requestId);
@@ -177,7 +207,7 @@ public class PriorAuthApiTests(ApiFactory factory) : IClassFixture<ApiFactory>, 
     public async Task An_approval_cannot_end_in_the_past()
     {
         var id = (await Submit(NewRequestId(), "H2019")).GetProperty("id").GetString()!;
-        var yesterday = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-1);
+        var yesterday = PlanToday().AddDays(-1);
 
         var decision = await _client.PostAsJsonAsync($"/internal/requests/{id}/approve", new { through = yesterday, reviewer = "Test Reviewer" });
 
@@ -219,7 +249,7 @@ public class PriorAuthApiTests(ApiFactory factory) : IClassFixture<ApiFactory>, 
         await _client.PostAsJsonAsync($"/internal/requests/{id}/request-information", new { missing = "Client plan", reviewer = "Test Reviewer" });
         var status = await Inquire(requestId);
         var laterApproval = await _client.PostAsJsonAsync($"/internal/requests/{id}/approve",
-            new { through = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(30), reviewer = "Test Reviewer" });
+            new { through = PlanToday().AddDays(30), reviewer = "Test Reviewer" });
 
         Assert.Equal("queued", status.GetProperty("outcome").GetString());
         Assert.Contains("Client plan", status.GetProperty("disposition").GetString());
@@ -233,7 +263,7 @@ public class PriorAuthApiTests(ApiFactory factory) : IClassFixture<ApiFactory>, 
         await _client.PostAsJsonAsync($"/internal/requests/{id}/deny", new { reason = "Not medically necessary per assessment", reviewer = "Test Reviewer" });
 
         var second = await _client.PostAsJsonAsync($"/internal/requests/{id}/approve",
-            new { through = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(30), reviewer = "Test Reviewer" });
+            new { through = PlanToday().AddDays(30), reviewer = "Test Reviewer" });
 
         Assert.Equal(HttpStatusCode.UnprocessableEntity, second.StatusCode);
     }
@@ -246,7 +276,7 @@ public class PriorAuthApiTests(ApiFactory factory) : IClassFixture<ApiFactory>, 
         await _client.PostAsJsonAsync($"/internal/requests/{id}/request-information", new { missing = "Client plan", reviewer = "Reviewer A" });
         await _client.PostAsJsonAsync($"/internal/requests/{id}/deny", new { reason = "Client plan never supplied", reviewer = "Reviewer B" });
 
-        var queue = await _client.GetFromJsonAsync<JsonElement>("/internal/requests");
+        var queue = await _client.GetFromJsonAsync<JsonElement>("/internal/requests?status=all&take=200");
         var request = queue.EnumerateArray().Single(r => r.GetProperty("id").GetString() == id);
 
         var actors = request.GetProperty("history").EnumerateArray().Select(h => h.GetProperty("actor").GetString()!).ToArray();
@@ -268,11 +298,14 @@ public class PriorAuthApiTests(ApiFactory factory) : IClassFixture<ApiFactory>, 
     }
 
     [Fact]
-    public async Task Inquiring_about_an_unknown_request_returns_not_found()
+    public async Task Inquiring_about_an_unknown_request_returns_an_empty_result()
     {
         var response = await _client.PostAsync("/fhir/Claim/$inquire", Fhir(RequestBundle("does-not-exist", "H2019")));
 
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var bundle = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("Bundle", bundle.GetProperty("resourceType").GetString());
+        Assert.False(bundle.TryGetProperty("entry", out _));
     }
 
     [Fact]
@@ -287,6 +320,10 @@ public class PriorAuthApiTests(ApiFactory factory) : IClassFixture<ApiFactory>, 
     // ---------- Helpers ----------
 
     private static string NewRequestId() => $"REQ-{Guid.NewGuid():N}";
+
+    /// <summary>Today in the plan's time zone, which is what approvals are checked against.</summary>
+    private static DateOnly PlanToday() =>
+        DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("America/Los_Angeles")));
 
     private static StringContent Fhir(string json) => new(json, Encoding.UTF8, "application/fhir+json");
 
@@ -307,33 +344,6 @@ public class PriorAuthApiTests(ApiFactory factory) : IClassFixture<ApiFactory>, 
         claimResponse.GetProperty("item")[0].GetProperty("adjudication")[0].GetProperty("extension")[0]
             .GetProperty("extension")[0].GetProperty("valueCodeableConcept").GetProperty("coding")[0].GetProperty("code").GetString();
 
-    private static string RequestBundle(string requestId, string serviceCode, string use = "preauthorization") => $$"""
-        {
-          "resourceType": "Bundle",
-          "type": "collection",
-          "entry": [
-            {
-              "fullUrl": "urn:uuid:11111111-1111-1111-1111-111111111111",
-              "resource": {
-                "resourceType": "Claim",
-                "identifier": [{ "system": "http://example.org/provider/claim-id", "value": "{{requestId}}" }],
-                "status": "active",
-                "type": { "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/claim-type", "code": "professional" }] },
-                "use": "{{use}}",
-                "patient": { "reference": "urn:uuid:22222222-2222-2222-2222-222222222222" },
-                "created": "2026-11-11",
-                "insurer": { "display": "County Behavioral Health Plan (synthetic)" },
-                "provider": { "display": "Example Clinic (synthetic)" },
-                "priority": { "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/processpriority", "code": "normal" }] },
-                "insurance": [{ "sequence": 1, "focal": true, "coverage": { "display": "Synthetic coverage" } }],
-                "item": [{ "sequence": 1, "productOrService": { "coding": [{ "code": "{{serviceCode}}" }] } }]
-              }
-            },
-            {
-              "fullUrl": "urn:uuid:22222222-2222-2222-2222-222222222222",
-              "resource": { "resourceType": "Patient", "name": [{ "family": "Testpatient", "given": ["Alex"] }] }
-            }
-          ]
-        }
-        """;
+    private static string RequestBundle(string requestId, string serviceCode, string use = "preauthorization") =>
+        PasFixtures.RequestBundle(requestId, serviceCode, use);
 }
