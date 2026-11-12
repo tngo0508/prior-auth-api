@@ -69,7 +69,7 @@ public static class FhirEndpoints
                     if (request is null) throw;
                     return await Resend(request);
                 }
-                return fhir.Result(PasMapper.ToResponseBundle(request, bundle!, PublicUrl.Base(http, config), DateTimeOffset.UtcNow));
+                return fhir.Result(PasMapper.ToResponseBundle(request, bundle!, PublicUrl.Base(http, config), clock));
             }
             return await Resend(request);
 
@@ -98,12 +98,12 @@ public static class FhirEndpoints
                     existing = (await Find(db, client.ClientId, submission.ProviderRequestSystem, submission.ProviderRequestId))!;
                 }
                 // The answer is built from the request as first received, so it always describes what was reviewed.
-                return fhir.Result(PasMapper.ToResponseBundle(existing, Stored(existing, fhir), PublicUrl.Base(http, config), DateTimeOffset.UtcNow));
+                return fhir.Result(PasMapper.ToResponseBundle(existing, Stored(existing, fhir), PublicUrl.Base(http, config), clock));
             }
         }).RequireAuthorization(Scopes.SubmitRequests).WithMetadata(new SizeLimit(MaxSubmitBytes));
 
         // Da Vinci PAS: ask for the current state of one of the caller's own requests, matched on Claim.identifier (system and value).
-        app.MapPost("/fhir/Claim/$inquire", async (HttpRequest http, ClaimsPrincipal user, IConfiguration config, FhirJson fhir, PriorAuthDb db) =>
+        app.MapPost("/fhir/Claim/$inquire", async (HttpRequest http, ClaimsPrincipal user, IConfiguration config, FhirJson fhir, PriorAuthDb db, PlanClock clock) =>
         {
             var (bundle, parseError) = fhir.ReadOperationBundle(await new StreamReader(http.Body).ReadToEndAsync());
             if (parseError is not null) return fhir.Problem(parseError);
@@ -117,12 +117,12 @@ public static class FhirEndpoints
             var request = await Find(db, user.ClientId(), identifier.System ?? "", identifier.Value);
             return request is null
                 ? fhir.Result(PasMapper.EmptyResultBundle(DateTimeOffset.UtcNow))
-                : fhir.Result(PasMapper.ToResponseBundle(request, Stored(request, fhir), PublicUrl.Base(http, config), DateTimeOffset.UtcNow));
+                : fhir.Result(PasMapper.ToResponseBundle(request, Stored(request, fhir), PublicUrl.Base(http, config), clock));
         }).RequireAuthorization(Scopes.SubmitRequests);
 
         // Read one of the caller's own responses. Another provider's response is reported as not found.
         app.MapGet("/fhir/ClaimResponse/{id}", async (string id, HttpRequest http, HttpResponse response, ClaimsPrincipal user,
-            IConfiguration config, FhirJson fhir, PriorAuthDb db) =>
+            IConfiguration config, FhirJson fhir, PriorAuthDb db, PlanClock clock) =>
         {
             var clientId = user.ClientId();
             var request = await db.AuthorizationRequests.FirstOrDefaultAsync(r => r.Id == id && r.ClientId == clientId);
@@ -134,7 +134,7 @@ public static class FhirEndpoints
             response.Headers.LastModified = new DateTimeOffset(request.LastChangedAtUtc, TimeSpan.Zero).ToString("R");
             if (http.Headers.IfNoneMatch.ToString() == etag) return Results.StatusCode(StatusCodes.Status304NotModified);
 
-            return fhir.Result(PasMapper.ToClaimResponse(request, PasMapper.FindClaim(Stored(request, fhir))!, PublicUrl.Base(http, config)));
+            return fhir.Result(PasMapper.ToClaimResponse(request, PasMapper.FindClaim(Stored(request, fhir))!, PublicUrl.Base(http, config), clock));
         }).RequireAuthorization(Scopes.ReadResponses);
     }
 

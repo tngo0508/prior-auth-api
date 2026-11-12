@@ -76,6 +76,20 @@ public class DomainRuleTests
     }
 
     [Fact]
+    public void The_response_issue_date_is_the_plans_date_of_the_decision()
+    {
+        var clock = new PlanClock(new FixedTime(new DateTimeOffset(2026, 11, 12, 1, 30, 0, TimeSpan.Zero)), new ConfigurationBuilder().Build());
+        var request = Pended();
+        request.Approve(new DateOnly(2026, 11, 30), "PA-1", "Reviewer", clock.UtcNow, clock.Today);
+        var claim = new Hl7.Fhir.Model.Claim { Item = [new() { Sequence = 1 }] };
+
+        var response = PriorAuth.Api.Fhir.PasMapper.ToClaimResponse(request, claim, "https://plan.example", clock);
+
+        var issued = response.Item[0].Extension.Single(e => e.Url == PriorAuth.Api.Fhir.PasMapper.ItemPreAuthIssueDateUrl).Value as Hl7.Fhir.Model.Date;
+        Assert.Equal("2026-11-11", issued?.Value);
+    }
+
+    [Fact]
     public void A_denial_carries_no_authorization_number_or_end_date()
     {
         var request = Pended();

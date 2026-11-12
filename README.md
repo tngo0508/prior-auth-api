@@ -10,17 +10,19 @@ It lets a contracted provider's software ask the plan for approval before delive
 
 | Area | State |
 |---|---|
-| Submit a request, check status, read the answer (Da Vinci PAS) | Working |
+| Submit a request, check status, read the answer (Da Vinci PAS) | Working: one service per request; no update, cancel or appeal |
 | Ask whether an order needs approval (Da Vinci CRD) | Working, basic: two of six hooks, no eligibility check |
 | Download the questionnaire for a service (Da Vinci DTR) | Working, basic: no automatic filling of answers |
 | Sign-in for provider systems (SMART Backend Services) | Working |
 | Supporting documents | Working |
-| Reviewer queue | Working, but reviewers do not sign in |
+| Reviewer queue | Working, but reviewers do not sign in; it only answers on the server's own machine |
 | SQL Server with migrations | Working |
 | Staff sign-in, hosting, conformance testing | Not started |
 | Service list and questions | Invented placeholders |
 
 Do not put real member information in it. See [status and open questions](docs/04-status-and-open-questions.md) for what is missing and what was assumed.
+
+On 2026-11-11 the code was audited against the CMS Prior Authorization API workflow and the Da Vinci guides, and the findings that could be fixed in code were fixed. The findings and what remains open are in [the November 2026 audit](docs/07-audit-2026-11.md).
 
 ## How it works in one picture
 
@@ -48,7 +50,7 @@ You need the .NET 10 SDK. Run these from the repository root.
 Start the service. The reviewer queue is at http://localhost:5020:
 
 ```bash
-dotnet run --project src/PriorAuth.Api --no-launch-profile --urls http://localhost:5020
+dotnet run --project src/PriorAuth.Api --no-launch-profile -- --urls http://localhost:5020 --environment Development
 ```
 
 In a second terminal, act as a provider's system. It asks about an order, downloads the questionnaire, submits a request with answers and a document, then waits for you to decide it in the queue:
@@ -84,6 +86,7 @@ Start with the architecture overview for the whole system on one page, then the 
 | [4. Status and open questions](docs/04-status-and-open-questions.md) | What is done, missing and assumed |
 | [5. Sign-in for provider systems](docs/05-sign-in.md) | How a provider's system proves who it is |
 | [6. Asking first: CRD and DTR](docs/06-crd-and-dtr.md) | How an EHR learns that approval is needed and what to send |
+| [7. November 2026 audit](docs/07-audit-2026-11.md) | What the audit against the CMS workflow found, and what was fixed |
 | [GLOSSARY.md](GLOSSARY.md) | The project's business terms |
 
 For developers of provider systems, the running service also serves a guide at `/developers.html`.
@@ -93,7 +96,7 @@ For developers of provider systems, the running service also serves a guide at `
 | Path | Contents |
 |---|---|
 | [src/PriorAuth.Api](src/PriorAuth.Api) | The service |
-| [tests/PriorAuth.Api.Tests](tests/PriorAuth.Api.Tests) | 65 integration tests; they run on SQLite or SQL Server |
+| [tests/PriorAuth.Api.Tests](tests/PriorAuth.Api.Tests) | 190 automated tests, almost all starting the real app; they run on SQLite or SQL Server |
 | [samples/PriorAuth.SampleClient](samples/PriorAuth.SampleClient) | A sample provider client |
 | [prototype/PriorAuth.Prototype](prototype/PriorAuth.Prototype) | Throwaway learning prototype, not part of the service |
 | [docs](docs) | Documentation, diagrams and screenshots |
@@ -109,7 +112,7 @@ Inside the service:
 | `Review` | The reviewer queue and decisions |
 | `Auth` | Registration and sign-in for provider systems |
 | `Data` | Database mapping and migrations |
-| `service-requirements.json` | The services that need approval, their paperwork and questions |
+| `service-requirements.json` | The services that need approval (each with its code system), their paperwork and questions. Checked at start-up: a duplicate code, question id or answer option stops the service from starting |
 
 ## Technology
 

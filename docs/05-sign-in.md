@@ -30,7 +30,7 @@ sequenceDiagram
     EHR->>API: GET /fhir/.well-known/smart-configuration
     API-->>EHR: Where the token endpoint is
     EHR->>API: POST /auth/token (signed assertion)
-    API->>API: Check signature, audience, expiry, not used before
+    API->>API: Check kid, signature, audience, expiry, not used before
     API-->>EHR: Access token, valid 300 seconds
 
     Note over EHR,API: Each API call
@@ -43,23 +43,31 @@ sequenceDiagram
 | Check | What it stops |
 |---|---|
 | The client id is registered and active | Unknown or switched-off systems |
-| The signature matches a registered public key | Someone pretending to be the provider |
+| `iss` and `sub` are both the client id | An assertion that does not say plainly who it is for |
+| The header's `kid` matches exactly one registered key, and only that key is tried | Guessing among keys, or a key set with ambiguous ids |
+| The signature matches that key | Someone pretending to be the provider |
+| Signing algorithm is RS384 or ES384, and fits the key's type | Weak or unsigned tokens |
+| The header's `typ`, if present, is `JWT` | Another kind of token being passed off as an assertion |
 | The assertion names this server's token address as its audience | An assertion made for another payer being reused here |
 | The assertion has not expired, and expires within five minutes | Old or long-lived assertions |
-| The assertion's unique id (`jti`) has not been seen before | A captured assertion being replayed |
-| Signing algorithm is RS384 or ES384 | Weak or unsigned tokens |
+| `iat`, if present, is not in the future | Assertions made in advance |
+| The assertion's unique id (`jti`) has not been seen before, checked under a lock | A captured assertion being replayed, even by two requests at once |
 
-Failures return `401` with `"error": "invalid_client"`.
+A check that depends on the client's registration fails with `401`, `"error": "invalid_client"` and the same message every time, so a caller cannot learn which client ids exist. The specific reason is written to the server log. A malformed request (not form encoded, wrong `grant_type` or `client_assertion_type`, no supported scope) gets `400` with the matching OAuth error.
+
+Token responses, successful or not, carry `Cache-Control: no-store`.
 
 ## What a token allows
 
-| Scope | Allows |
-|---|---|
-| `system/Claim.write` | Submit a request and inquire about it |
-| `system/ClaimResponse.read` | Read a response by its id |
-| `system/Questionnaire.read` | Download questionnaires |
+| Scope (SMART v1) | SMART v2 equivalents | Allows |
+|---|---|---|
+| `system/Claim.write` | `system/Claim.c`, `system/Claim.cud` | Submit a request and inquire about it |
+| `system/ClaimResponse.read` | `system/ClaimResponse.rs` | Read a response by its id |
+| `system/Questionnaire.read` | `system/Questionnaire.rs`, `system/questionnaire.rs` (the DTR spelling) | Download questionnaires, report questionnaire errors |
 
-A provider only ever sees its own requests. If Clinic B asks about Clinic A's request, the answer is "not found", the same as for a request that does not exist. Two providers may use the same request number without colliding.
+Both spellings are accepted. Any v2 permission string works if it contains the letter the action needs (`c` for Claim, `r` for the other two), so `system/ClaimResponse.r` reads responses but `system/Claim.rs` cannot submit. The token response echoes the scopes as the client spelled them. Scopes with parameters (`?`) or wildcards are not offered.
+
+A provider only ever sees its own requests. If Clinic B asks about Clinic A's request, the answer is the same as for a request that does not exist: an empty result from `$inquire`, 404 from reading by id. Two providers may use the same request number without colliding.
 
 The provider name recorded on a request is the name the agency registered, not whatever the request itself claims.
 
@@ -67,6 +75,13 @@ The provider name recorded on a request is the name the agency registered, not w
 
 - `GET /fhir/metadata` and `GET /fhir/.well-known/smart-configuration`: they only describe the server.
 - `GET /requirements`: the list of services needing approval is plan policy, not member data.
+- `GET /health`: says only whether the service and its database are up.
+
+## The discovery document
+
+`/fhir/.well-known/smart-configuration` lists the token endpoint, `client_credentials` as the only grant, `private_key_jwt` with RS384 and ES384, the scopes above, and the capabilities `client-confidential-asymmetric`, `permission-v1` and `permission-v2`.
+
+SMART requires every server to list an `authorization_endpoint` and `code_challenge_methods_supported`, even one that offers only Backend Services. So the document lists `/auth/authorize` and `S256`. There is no user sign-in: `/auth/authorize` answers every request with `400` and `"error": "unsupported_response_type"`.
 
 ## Registering a provider
 
@@ -79,9 +94,17 @@ Content-Type: application/json
 { "name": "Example Clinic", "jwks": { "keys": [ { "kty": "RSA", "kid": "...", "use": "sig", "alg": "RS384", "n": "...", "e": "AQAB" } ] } }
 ```
 
-The answer contains the `clientId` to give to the provider. If the key set contains private key material, the server refuses it and says so, because that key must then be treated as compromised.
+The answer (201) contains the `clientId` to give to the provider. Every key in the set must pass these rules, or the registration is refused with 422 and a message naming the key and the problem:
 
-`POST /internal/clients/{clientId}/deactivate` switches a client off. It can no longer get tokens, and a token it already holds stops working for new submissions.
+- RSA keys of at least 2048 bits (for RS384), or EC keys on curve P-384 (for ES384). Nothing else.
+- Each key has its own non-empty `kid`.
+- `use`, if given, is `sig`; `alg`, if given, matches the key type.
+- No symmetric (`oct`) keys: a shared secret must never be sent.
+- No private key material. If the set contains any, the server says so, because that key must then be treated as compromised.
+
+The same rules are checked again each time a key is used, so a key registered before the rules existed cannot be used either.
+
+`POST /internal/clients/{clientId}/deactivate` switches a client off. It can no longer get tokens, and a token it already holds is refused at once on every call, not only when it expires.
 
 ## Try it
 
@@ -95,18 +118,21 @@ dotnet run --project samples/PriorAuth.SampleClient -- http://localhost:5020
 
 ## Limits to know about
 
-- **Agency staff do not sign in yet.** Until they do, everything under `/internal` (the reviewer queue and client registration) only answers callers on the server's own machine. This is a stopgap, tracked in [issue #2](https://github.com/tngo0508/prior-auth-api/issues/2).
-- **One server instance only.** The key that signs access tokens is created at start-up, and the "already used" memory for assertions lives in that one process. Before running more than one instance, move both to shared storage.
-- **Scopes use the SMART v1 names.** SMART v2 spells them differently (`system/Claim.c`, and so on). Which one providers' systems expect is not yet confirmed.
+- **Agency staff do not sign in yet.** Until they do, everything under `/internal` (the reviewer queue and client registration) only answers callers on the server's own machine that were not forwarded by a proxy, and changes need the reviewer page's `X-Requested-By: prior-auth-reviewer` header. This is a stopgap, tracked in [issue #18](https://github.com/tngo0508/prior-auth-api/issues/18). The full rule is in [Running and testing](03-running-and-testing.md#for-agency-staff).
+- **One server instance only.** The key that signs access tokens is created at start-up, so a restart signs every provider out, and the "already used" memory for assertions lives in that one process. Before running more than one instance, move the key to a secret store and the memory to shared storage ([issue #14](https://github.com/tngo0508/prior-auth-api/issues/14)).
+- **No key rotation by URL.** Keys are registered as a fixed set; a JWKS URL is not accepted ([issue #31](https://github.com/tngo0508/prior-auth-api/issues/31)).
+- **The public address must be configured.** Outside Development the server will not start without `Auth:PublicBaseUrl` set to an absolute https URL. Token audiences and the addresses in the discovery document come from it, never from the caller's `Host` header.
 - **TLS is required in any real deployment.** A bearer token is as good as a password to anyone who can read the traffic.
 
 Where the code is:
 
 | File | Purpose |
 |---|---|
-| [Auth/TokenEndpoint.cs](../src/PriorAuth.Api/Auth/TokenEndpoint.cs) | The token endpoint and every check in the table above |
-| [Auth/AccessTokens.cs](../src/PriorAuth.Api/Auth/AccessTokens.cs) | Scope names and access token creation |
-| [Auth/AuthSetup.cs](../src/PriorAuth.Api/Auth/AuthSetup.cs) | Token validation on API calls, scope policies, the local-only guard |
+| [Auth/TokenEndpoint.cs](../src/PriorAuth.Api/Auth/TokenEndpoint.cs) | The discovery document, `/auth/authorize` and the token endpoint |
+| [Auth/ClientAssertions.cs](../src/PriorAuth.Api/Auth/ClientAssertions.cs) | Every check in the table above, and the public address setting |
+| [Auth/ClientKeys.cs](../src/PriorAuth.Api/Auth/ClientKeys.cs) | Which keys may be registered and used |
+| [Auth/AccessTokens.cs](../src/PriorAuth.Api/Auth/AccessTokens.cs) | Scope names (v1 and v2) and access token creation |
+| [Auth/AuthSetup.cs](../src/PriorAuth.Api/Auth/AuthSetup.cs) | Token validation on API calls, refusing deactivated clients, sign-in errors as `OperationOutcome`, scope policies, the local-only guard |
 | [Auth/ClientRegistrationEndpoints.cs](../src/PriorAuth.Api/Auth/ClientRegistrationEndpoints.cs) | Registering and deactivating provider systems |
 | [Auth/ProviderClient.cs](../src/PriorAuth.Api/Auth/ProviderClient.cs) | The stored record of a registered system |
 

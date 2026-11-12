@@ -201,14 +201,14 @@ public static class PasMapper
     // ---------- Writing an answer ----------
 
     /// <summary>The answer to $submit or $inquire: the ClaimResponse first, then what it refers to.</summary>
-    public static Bundle ToResponseBundle(AuthorizationRequest request, Bundle submitted, string baseUrl, DateTimeOffset now)
+    public static Bundle ToResponseBundle(AuthorizationRequest request, Bundle submitted, string baseUrl, PlanClock clock)
     {
         var claim = FindClaim(submitted)!;
-        var response = ToClaimResponse(request, claim, baseUrl, containInformationRequest: false);
+        var response = ToClaimResponse(request, claim, baseUrl, clock, containInformationRequest: false);
         var bundle = new Bundle
         {
             Type = Bundle.BundleType.Collection,
-            Timestamp = now,
+            Timestamp = new DateTimeOffset(clock.UtcNow, TimeSpan.Zero),
             Entry = [new Bundle.EntryComponent { FullUrl = $"{baseUrl}/fhir/ClaimResponse/{request.Id}", Resource = response }],
         };
 
@@ -237,7 +237,7 @@ public static class PasMapper
     /// <param name="containInformationRequest">
     /// When the ClaimResponse is read on its own there is no Bundle to hold the CommunicationRequest, so it is contained instead.
     /// </param>
-    public static ClaimResponse ToClaimResponse(AuthorizationRequest request, Claim claim, string baseUrl, bool containInformationRequest = true)
+    public static ClaimResponse ToClaimResponse(AuthorizationRequest request, Claim claim, string baseUrl, PlanClock clock, bool containInformationRequest = true)
     {
         // X12 306 review action codes, as used by PAS.
         var (outcome, code, display) = request.Status switch
@@ -261,7 +261,7 @@ public static class PasMapper
 
         var item = new ClaimResponse.ItemComponent { ItemSequence = claim.Item.FirstOrDefault()?.Sequence ?? 1, Adjudication = [adjudication] };
         if (request.DecidedAtUtc is { } decided && request.Status is AuthorizationStatus.Approved or AuthorizationStatus.Denied)
-            item.Extension.Add(new Extension(ItemPreAuthIssueDateUrl, new Date(decided.ToString("yyyy-MM-dd"))));
+            item.Extension.Add(new Extension(ItemPreAuthIssueDateUrl, new Date(clock.LocalDate(decided).ToString("yyyy-MM-dd"))));
 
         var response = new ClaimResponse
         {

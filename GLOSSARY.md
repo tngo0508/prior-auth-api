@@ -20,6 +20,14 @@ _Avoid_: Client app, EHR, integration, API user
 A Provider's request for approval of one service for one member over a period.
 _Avoid_: Claim, TAR, ticket, case
 
+**Request Identifier**:
+The number a Provider System gives an Authorization Request (a system and a value). Together with the Provider System it names exactly one Authorization Request; sending it again is a resend, and it cannot be reused for another member or service.
+_Avoid_: Claim number, tracking number, reference number
+
+**Resend**:
+A Provider System sending an Authorization Request again under the same Request Identifier, to retry, to check, or to answer an Information Request. It never creates a second request.
+_Avoid_: Resubmission, duplicate, update
+
 **Reviewer**:
 A member of the plan's clinical staff who decides an Authorization Request. Decisions are always made by a Reviewer, never automatically.
 _Avoid_: Adjudicator, approver
@@ -37,5 +45,9 @@ A Reviewer's approval or denial of an Authorization Request. An approval carries
 _Avoid_: Determination, adjudication, outcome
 
 **Service Requirement**:
-A covered service that needs authorization, together with the documentation the plan requires for it. Drugs are never Service Requirements.
+A covered service that needs authorization, identified by a code and its code system (HCPCS or CPT), together with the documentation and questions the plan requires for it. Drugs are never Service Requirements.
 _Avoid_: Rule, policy, coverage rule
+
+**Plan Date**:
+The calendar date in the Behavioral Health Plan's time zone. "Today" for approvals, authorization numbers and coverage answers is always the Plan Date, never the UTC date.
+_Avoid_: Server date, UTC date

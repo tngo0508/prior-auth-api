@@ -26,7 +26,7 @@
 <p>This API lets your system ask whether a service needs prior authorization, see what documentation is required, send a request with that documentation, and get the plan's answer. It uses HL7 FHIR R4 and follows the Da Vinci Prior Authorization Support (PAS) guide. Drugs are out of scope.</p>
 
 <h2>1. Get registered</h2>
-<p>Create an RSA or EC key pair. Keep the private key. Send the plan your public key as a JSON Web Key Set. The plan registers your system and gives you a <code>client_id</code>. Never send a private key; a key set containing one is refused.</p>
+<p>Create a key pair: RSA of at least 2048 bits (for RS384) or EC on curve P-384 (for ES384). Keep the private key. Send the plan your public key as a JSON Web Key Set in which every key has its own <code>kid</code>. The plan registers your system and gives you a <code>client_id</code>. Never send a private key or a shared secret; a key set containing one, or a symmetric (<code>oct</code>) key, is refused.</p>
 
 <h2>2. Sign in</h2>
 <p>Sign-in follows SMART Backend Services. Read <a href="/fhir/.well-known/smart-configuration"><code>/fhir/.well-known/smart-configuration</code></a> to find the token endpoint, then post a signed assertion to it:</p>
@@ -34,40 +34,43 @@
 Content-Type: application/x-www-form-urlencoded
 
 grant_type=client_credentials
-&amp;scope=system/Claim.write system/ClaimResponse.read system/Questionnaire.read
+&amp;scope=system/Claim.c system/ClaimResponse.rs system/Questionnaire.rs
 &amp;client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer
 &amp;client_assertion=&lt;signed JWT&gt;</code></pre>
-<p>The assertion is a JWT signed with RS384 or ES384 whose claims are:</p>
+<p>SMART v1 scope names work too: <code>system/Claim.write</code>, <code>system/ClaimResponse.read</code>, <code>system/Questionnaire.read</code>. The token response echoes the scopes as you spelled them. <code>system/Claim.c</code> allows submit and inquire, <code>system/ClaimResponse.rs</code> reading answers, and <code>system/Questionnaire.rs</code> (or <code>system/questionnaire.rs</code>) the DTR endpoints.</p>
+<p>The assertion is a JWT signed with RS384 or ES384. Its header carries the <code>kid</code> of the registered key that signed it (it must match exactly one key) and, if present, <code>typ</code> <code>JWT</code>. Its claims are:</p>
 <div class="wrap"><table>
 <tr><th>Claim</th><th>Value</th></tr>
 <tr><td><code>iss</code> and <code>sub</code></td><td>Your <code>client_id</code></td></tr>
 <tr><td><code>aud</code></td><td>The token endpoint URL exactly as published</td></tr>
 <tr><td><code>exp</code></td><td>No more than five minutes ahead</td></tr>
 <tr><td><code>jti</code></td><td>A value you never reuse. Each assertion works once.</td></tr>
+<tr><td><code>iat</code></td><td>Optional. If present, not in the future.</td></tr>
 </table></div>
-<p>The answer contains an <code>access_token</code> valid for 300 seconds. Send it on every call as <code>Authorization: Bearer &lt;token&gt;</code>, and sign in again when it expires.</p>
+<p>The answer contains an <code>access_token</code> valid for 300 seconds. Send it on every call as <code>Authorization: Bearer &lt;token&gt;</code>, and sign in again when it expires. A refused assertion gets <code>401</code> <code>invalid_client</code> with the same message whatever the reason. This server offers only SMART Backend Services; the <code>authorization_endpoint</code> in the discovery document exists because SMART requires it, and always answers <code>400</code>.</p>
 
 <h2>3. Check what needs authorization</h2>
-<p><a href="/requirements"><code>GET /requirements</code></a> lists every service that needs prior authorization and the documentation required for each. <code>GET /requirements?code=H2019</code> answers for one service; an empty list means no authorization is needed. No token is required.</p>
+<p><a href="/requirements"><code>GET /requirements</code></a> lists every service that needs prior authorization, with its code system, and the documentation required for each. <code>GET /requirements?code=H2019</code> answers for one service; add <code>&amp;system=</code> to match the code system exactly. An empty list means no authorization is needed. No token is required.</p>
 
 <h2>Ask from inside the EHR: CRD and DTR</h2>
 <p>If your system supports the Da Vinci CRD and DTR guides, it can get the same information in standard form.</p>
 <div class="wrap"><table>
 <tr><th>Address</th><th>Purpose</th><th>Authentication</th></tr>
 <tr><td><a href="/cds-services"><code>GET /cds-services</code></a></td><td>CDS Hooks discovery</td><td>None</td></tr>
-<tr><td><code>POST /cds-services/prior-auth-order-sign</code><br><code>POST /cds-services/prior-auth-order-select</code></td><td>Send <code>context.draftOrders</code>. Each <code>ServiceRequest</code> comes back in <code>systemActions</code> with the CRD coverage information extension: <code>pa-needed</code> is <code>auth-needed</code> or <code>no-auth</code>, and <code>questionnaire</code> names the questionnaire to complete. Name the member's coverage in <code>ServiceRequest.insurance</code> or send it in <code>prefetch.coverage</code>.</td><td>CDS Hooks JWT: signed with your registered key, <code>iss</code> your <code>client_id</code>, <code>aud</code> the service URL, a fresh <code>jti</code>, <code>exp</code> within five minutes</td></tr>
-<tr><td><code>POST /fhir/Questionnaire/$questionnaire-package</code></td><td>Send a <code>Parameters</code> resource with a <code>questionnaire</code> canonical or an <code>order</code>. The answer has one <code>PackageBundle</code> per questionnaire: the <code>Questionnaire</code> first, then a draft <code>QuestionnaireResponse</code>.</td><td>Access token with <code>system/Questionnaire.read</code></td></tr>
+<tr><td><code>POST /cds-services/prior-auth-order-sign</code><br><code>POST /cds-services/prior-auth-order-select</code></td><td>Send <code>context.draftOrders</code> (and, for order-select, <code>context.selections</code>). Give each order's code its system (HCPCS <code>http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets</code> or CPT <code>http://www.ama-assn.org/go/cpt</code>), and include <code>authoredOn</code> and <code>requester</code>. Each <code>ServiceRequest</code> comes back in <code>systemActions</code> with the CRD coverage information extension: <code>pa-needed</code> is <code>auth-needed</code> or <code>no-auth</code>; on order-sign, <code>doc-purpose</code> is <code>withpa</code> and <code>questionnaire</code> names the questionnaire to complete. Name the member's coverage in <code>ServiceRequest.insurance</code> or send it in <code>prefetch.coverage</code>. Cards carry <code>source.topic</code> <code>coverage-info</code>. A body of the wrong shape gets 422. The <code>coverage-info</code> configuration option (default on) can be turned off.</td><td>CDS Hooks JWT: signed with your registered key, <code>iss</code> your <code>client_id</code>, <code>aud</code> the service URL, a fresh <code>jti</code>, <code>exp</code> within five minutes</td></tr>
+<tr><td><code>POST /fhir/Questionnaire/$questionnaire-package</code></td><td>Send a <code>Parameters</code> resource with a <code>questionnaire</code> (the full canonical URL, optionally <code>|1</code>) or an <code>order</code>, and the member's <code>coverage</code>. The answer has one <code>PackageBundle</code> per questionnaire: the <code>Questionnaire</code> first, then a draft <code>QuestionnaireResponse</code> following the DTR profile. Anything that could not be used is reported in an <code>OperationOutcome</code> under the parameter <code>operationOutcome</code>.</td><td>Access token with <code>system/Questionnaire.read</code></td></tr>
+<tr><td><code>POST /fhir/Questionnaire/$log-questionnaire-errors</code></td><td>Report a problem with one of the plan's questionnaires: a <code>Parameters</code> resource with <code>Questionnaire</code> (canonical) and <code>OperationOutcome</code>. Do not include member information.</td><td>Access token with <code>system/Questionnaire.read</code></td></tr>
 </table></div>
 <p>Include the completed <code>QuestionnaireResponse</code> in the Bundle you submit in the next step. This service does not check member eligibility; <code>covered</code> is <code>conditional</code> for any service not on the plan's list.</p>
 
 <h2>4. Submit a request</h2>
-<p><code>POST /fhir/Claim/$submit</code> with <code>Content-Type: application/fhir+json</code>. The body is a FHIR <code>Bundle</code> of type <code>collection</code> containing:</p>
+<p><code>POST /fhir/Claim/$submit</code> with <code>Content-Type: application/fhir+json</code>. The server speaks FHIR JSON only: a non-JSON body gets 415, and asking for XML with <code>Accept</code> or <code>_format</code> gets 406. The body is a FHIR <code>Bundle</code> of type <code>collection</code>, sent directly or wrapped in <code>Parameters</code> under <code>resource</code>, whose <strong>first entry is the Claim</strong>. One request is for one service. It contains:</p>
 <div class="wrap"><table>
 <tr><th>Resource</th><th>What we read</th></tr>
-<tr><td><code>Claim</code> (required)</td><td><code>use</code> must be <code>preauthorization</code>. <code>identifier[0].value</code> is your request number. <code>insurer</code> is required. <code>item[0].productOrService.coding[0].code</code> is the service code. All elements FHIR itself requires must be present.</td></tr>
-<tr><td><code>Patient</code></td><td>The member's name.</td></tr>
+<tr><td><code>Claim</code> (required)</td><td>Exactly one. <code>status</code> must be <code>active</code> and <code>use</code> <code>preauthorization</code>. <code>identifier[0]</code> (system and value, each at most 200 characters, no leading or trailing spaces) is your request number. <code>insurer</code> is required. <code>item</code> has exactly one entry, whose <code>productOrService.coding</code> carries the service code <em>and its system</em> (HCPCS or CPT). <code>patient</code> must reference the Patient in the Bundle. No <code>modifierExtension</code>: update and cancel are not supported. All elements FHIR itself requires must be present.</td></tr>
+<tr><td><code>Patient</code> (required)</td><td>The one <code>Claim.patient</code> points to, by <code>fullUrl</code> or type and id. The member's name and first identifier.</td></tr>
 <tr><td><code>QuestionnaireResponse</code> (zero or more)</td><td>Answers to the plan's questionnaire for the service. The reviewer sees each question with its answer.</td></tr>
-<tr><td><code>DocumentReference</code> (zero or more)</td><td>Supporting documents, sent inline in <code>content.attachment.data</code>. Accepted types: PDF, JPEG, PNG, TIFF, plain text. Up to 5 MB each and 10 per submission. Links are not accepted.</td></tr>
+<tr><td><code>DocumentReference</code> (zero or more)</td><td>Supporting documents, sent inline in <code>content.attachment.data</code>. Accepted types: PDF, JPEG, PNG, TIFF, plain text. Up to 5 MB each and 10 per submission. Links are not accepted. A body larger than about 71 MB is refused with 413.</td></tr>
 </table></div>
 <p>The answer is a <code>Bundle</code> whose first entry is a <code>ClaimResponse</code>. Read the decision from the review action code in <code>item[0].adjudication[0].extension</code>:</p>
 <div class="wrap"><table>
@@ -77,22 +80,27 @@ grant_type=client_credentials
 <tr><td>A3</td><td><code>complete</code></td><td>Denied.</td><td><code>disposition</code> (the specific reason)</td></tr>
 <tr><td>NA</td><td><code>complete</code></td><td>No authorization is required for this service.</td><td></td></tr>
 </table></div>
-<p>Sending the same request number again returns the current answer; it does not create a second request.</p>
+<p>A request is identified by your system plus the system and value of <code>Claim.identifier</code>. Sending the same request number again for the same member and service returns the current answer; it does not create a second request. Sending it for a different member or service is refused with 422: use a new number.</p>
 
 <h2>5. Get the decision</h2>
-<p>A person reviews every request, so the first answer is normally "pended". Ask again with <code>POST /fhir/Claim/$inquire</code>, sending a Bundle whose Claim carries the same request number, or read <code>GET /fhir/ClaimResponse/{id}</code>.</p>
+<p>A person reviews every request, so the first answer is normally "pended". Ask again with <code>POST /fhir/Claim/$inquire</code>, sending a Bundle whose Claim carries the same request number (system and value), or read <code>GET /fhir/ClaimResponse/{id}</code>. If nothing matches, <code>$inquire</code> answers 200 with an empty Bundle. Reading by id returns an <code>ETag</code>; send it back in <code>If-None-Match</code> and you get <code>304 Not Modified</code> until the answer changes, so polling is cheap. The plan does not push notifications.</p>
 
 <h2>6. Answer a request for more information</h2>
-<p>When the reviewer needs something, the response Bundle includes a <code>CommunicationRequest</code> whose <code>payload.contentString</code> says what is missing. Send the request again to <code>$submit</code> with the same request number and the missing <code>DocumentReference</code> resources. The request returns to the review queue.</p>
+<p>When the reviewer needs something, the response Bundle includes a <code>CommunicationRequest</code> whose <code>payload.contentString</code> says what is missing. Send the request again to <code>$submit</code> with the same request number and the missing <code>DocumentReference</code> resources. If at least one document is new (not identical to one already sent), the request returns to the review queue; a plain retry does not.</p>
 
 <h2>Errors</h2>
 <div class="wrap"><table>
 <tr><th>Status</th><th>Meaning</th></tr>
-<tr><td>400</td><td>The body is not valid FHIR, or breaks a rule above. The body is an <code>OperationOutcome</code> that says why.</td></tr>
-<tr><td>401</td><td>No token, an expired token, or a refused sign-in.</td></tr>
-<tr><td>403</td><td>The token lacks the needed scope, or your registration is no longer active.</td></tr>
-<tr><td>404</td><td>No such request among the ones your system sent.</td></tr>
+<tr><td>400</td><td>The body is not valid FHIR, or breaks a rule above.</td></tr>
+<tr><td>401</td><td>No token, an expired token, a refused sign-in, or your registration is no longer active.</td></tr>
+<tr><td>403</td><td>The token lacks the needed scope.</td></tr>
+<tr><td>404</td><td>No such response among the ones your system sent, or no such address.</td></tr>
+<tr><td>406</td><td>You asked for something other than JSON.</td></tr>
+<tr><td>413</td><td>The request body is too large.</td></tr>
+<tr><td>415</td><td>The body is not <code>application/fhir+json</code>.</td></tr>
+<tr><td>422</td><td>A request number reused for a different member or service, or a CDS Hooks call of the wrong shape.</td></tr>
 </table></div>
+<p>Every error from <code>/fhir</code> is an <code>OperationOutcome</code> that says why.</p>
 
 <h2>Machine-readable descriptions</h2>
 <p><a href="/fhir/metadata"><code>/fhir/metadata</code></a> is the FHIR CapabilityStatement. <a href="/fhir/.well-known/smart-configuration"><code>/fhir/.well-known/smart-configuration</code></a> describes sign-in.</p>
