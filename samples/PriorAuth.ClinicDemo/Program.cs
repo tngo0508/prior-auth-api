@@ -26,7 +26,43 @@ demo.MapPost("/send", (SendRequest request, PlanConnection plan) => plan.Run(() 
 demo.MapPost("/status", (PlanConnection plan) => plan.Run(plan.StatusAsync));
 demo.MapPost("/reset", (PlanConnection plan) => { plan.Reset(); return Results.Ok(new { ok = true }); });
 
-app.Run();
+try
+{
+    app.Run();
+}
+catch (Exception failure) when (PortTaken(failure, out var reserved))
+{
+    // Another copy of the demo is running, or (on Windows) Hyper-V, WSL or Docker reserved the port.
+    Console.Error.WriteLine($"""
+
+        The clinic demo could not start: {failure.Message}
+        {(reserved ? "Windows refused the port. It is usually reserved by Hyper-V, WSL or Docker." : "Another program is using the port, often another copy of the demo.")}
+
+        Start it on another port instead (and say where the plan's API is, if that moved too):
+          dotnet run --project samples/PriorAuth.ClinicDemo -- --urls http://localhost:5130 --PlanApi {planApi}
+
+        On Windows, list the reserved ports with:
+          netsh interface ipv4 show excludedportrange protocol=tcp
+        See "If a port is in use" in docs/03-running-and-testing.md.
+        """);
+    Environment.ExitCode = 1;
+}
+
+static bool PortTaken(Exception failure, out bool reserved)
+{
+    reserved = false;
+    var taken = false;
+    for (Exception? e = failure; e is not null; e = e.InnerException)
+    {
+        if (e is Microsoft.AspNetCore.Connections.AddressInUseException) taken = true;
+        if (e is System.Net.Sockets.SocketException socket)
+        {
+            if (socket.SocketErrorCode == System.Net.Sockets.SocketError.AddressAlreadyInUse) taken = true;
+            if (socket.SocketErrorCode == System.Net.Sockets.SocketError.AccessDenied) taken = reserved = true;
+        }
+    }
+    return taken;
+}
 
 internal sealed record ServiceChoice(string Id);
 

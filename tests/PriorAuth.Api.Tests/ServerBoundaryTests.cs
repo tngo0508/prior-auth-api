@@ -2,6 +2,8 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using System.Net.Sockets;
+using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.Hosting;
 
 namespace PriorAuth.Api.Tests;
@@ -9,6 +11,38 @@ namespace PriorAuth.Api.Tests;
 /// <summary>What the server does at its edges: who may reach the internal endpoints, what headers protect answers, and how the FHIR API refuses what it does not speak.</summary>
 public class ServerBoundaryTests(ApiFactory factory) : IClassFixture<ApiFactory>
 {
+    // ---------- Start-up ----------
+
+    [Fact]
+    public void A_port_already_in_use_is_explained_with_how_to_pick_another()
+    {
+        var failure = new IOException("Failed to bind to address http://127.0.0.1:5020: address already in use.",
+            new AddressInUseException("Address already in use", new SocketException((int)SocketError.AddressAlreadyInUse)));
+
+        var message = PortProblem.Explain(failure);
+
+        Assert.NotNull(message);
+        Assert.Contains("http://127.0.0.1:5020", message);
+        Assert.Contains("--urls http://localhost:", message);
+        Assert.Contains("--PlanApi", message);
+        Assert.Contains("excludedportrange", message);
+    }
+
+    [Fact]
+    public void A_port_Windows_has_reserved_is_explained_too()
+    {
+        var message = PortProblem.Explain(new SocketException((int)SocketError.AccessDenied));
+
+        Assert.NotNull(message);
+        Assert.Contains("reserved", message);
+    }
+
+    [Fact]
+    public void Other_start_up_failures_are_left_as_they_are()
+    {
+        Assert.Null(PortProblem.Explain(new InvalidOperationException("The service list is broken.")));
+    }
+
     // ---------- Internal endpoints ----------
 
     [Fact]

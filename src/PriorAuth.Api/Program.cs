@@ -160,6 +160,16 @@ app.MapClientRegistrationEndpoints();
 app.MapStaffSignIn();
 app.MapRazorPages();
 
-app.Run();
+try
+{
+    app.Run();
+}
+catch (Exception failure) when (PriorAuth.Api.PortProblem.Explain(failure) is { } explanation)
+{
+    // A port that is taken or reserved is the most common start-up failure on a developer machine. Say what to do.
+    Console.Error.WriteLine();
+    Console.Error.WriteLine(explanation);
+    Environment.ExitCode = 1;
+}
 
 public partial class Program;

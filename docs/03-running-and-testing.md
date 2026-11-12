@@ -20,6 +20,51 @@ To start with an empty database, stop the app and delete `src/PriorAuth.Api/prio
 
 The developer guide for provider systems is served at http://localhost:5020/developers.html.
 
+### If a port is in use
+
+The service listens on 5020 and the clinic demo on 5030. If either port is taken, the app stops at start-up and says so, with the commands below. There are two usual causes:
+
+- **Another copy is still running**, in another terminal, in Rider or Visual Studio, or left behind by a crashed run. Stop it and start again.
+- **On Windows, the port is reserved.** Hyper-V, WSL and Docker reserve blocks of ports, and can pick different blocks after a restart. Windows then refuses the port even though nothing is using it (the error says "forbidden by its access permissions").
+
+To see which ports Windows has reserved, in a terminal:
+
+```bash
+netsh interface ipv4 show excludedportrange protocol=tcp
+```
+
+To run on other ports, start both apps with new addresses, and tell the demo where the service is:
+
+```bash
+dotnet run --project src/PriorAuth.Api --no-launch-profile -- --urls http://localhost:5120 --environment Development
+```
+
+```bash
+dotnet run --project samples/PriorAuth.ClinicDemo -- --urls http://localhost:5130 --PlanApi http://localhost:5120
+```
+
+The portal is then at http://localhost:5120 and the demo at http://localhost:5130. In Rider or Visual Studio, change `applicationUrl` in [launchSettings.json](../src/PriorAuth.Api/Properties/launchSettings.json) instead.
+
+To keep 5020 and 5030 for good on a Windows machine, an administrator can reserve them for your own use, so Hyper-V cannot take them. Run in an administrator terminal, once:
+
+```bash
+net stop winnat
+```
+
+```bash
+netsh interface ipv4 add excludedportrange protocol=tcp startport=5020 numberofports=1
+```
+
+```bash
+netsh interface ipv4 add excludedportrange protocol=tcp startport=5030 numberofports=1
+```
+
+```bash
+net start winnat
+```
+
+Stopping `winnat` briefly cuts network access for WSL and Docker containers. Ports reserved this way show with a `*` in the list above, and programs started by you can still use them.
+
 ### Running on SQL Server
 
 SQLite is for local development. On SQL Server the app applies its migrations at start-up:

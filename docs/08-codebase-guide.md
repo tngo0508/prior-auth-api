@@ -52,6 +52,7 @@ Four ideas carry most of the design:
 prior-auth-api/
 ├── src/PriorAuth.Api/                 the service (the only deployable)
 │   ├── Program.cs                     start-up, DI, middleware pipeline, endpoint mapping
+│   ├── PortProblem.cs                 explains a port that is taken or reserved at start-up
 │   ├── appsettings*.json              settings (section 14)
 │   ├── service-requirements.json      services needing PA, their documents and questions
 │   ├── Domain/
