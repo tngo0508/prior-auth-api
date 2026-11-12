@@ -4,7 +4,7 @@
     {
       "name": "prior-auth-api",
       "runtimeExecutable": "dotnet",
-      "runtimeArgs": ["run", "--project", "src/PriorAuth.Api", "--no-launch-profile", "--urls", "http://localhost:5020"],
+      "runtimeArgs": ["run", "--project", "src/PriorAuth.Api", "--no-launch-profile", "--", "--urls", "http://localhost:5020", "--environment", "Development"],
       "port": 5020
     },
     {
