@@ -577,13 +577,13 @@ flowchart TD
     K -- no --> CARD1["info card: order incomplete"]
     K -- yes --> L{"coverage: order.insurance, else prefetched Coverage id"}
     L -- none --> CARD2["info card: coverage not supplied"]
-    L -- found --> M["build coverage-information extension<br/>covered / pa-needed from catalog.Match;<br/>doc-needed, doc-purpose withpa, questionnaire only on order-sign"]
+    L -- found --> M["build coverage-information extension<br/>pa-needed and reason from the review rule (catalog.Match, no modifiers);<br/>doc-needed, doc-purpose withpa, questionnaire only on order-sign"]
     M --> N{"same assertion already on the order<br/>for this coverage? (ignoring date and id)"}
     N -- yes --> NOOP[no update]
     N -- no --> UPD["add date + coverage-assertion-id,<br/>replace old extension for this coverage,<br/>systemAction 'update' with the order"]
 ```
 
-- **Answers.** Services on the list get `covered` and `auth-needed`. Anything else gets `conditional` and `no-auth`; this is under review in #23.
+- **Answers.** `covered` is always `conditional` (no enrolment check). `pa-needed` follows the service's review rule: `auth-needed` for prior authorization; `no-auth` with a `reason` for concurrent review, for listed services the plan may not prior-authorize, and plain `no-auth` for well-formed codes not on the list; `conditional` with a `reason` when the code is ambiguous without modifiers or cannot be recognised. The full table is in [9. The service list](09-service-list.md#what-each-rule-makes-the-api-say).
 - **Cards.** Every card carries `source.label` (`Plan:Name`) and `source.topic` (coverage-info), and its summary is cut to 139 characters.
 - **The two hooks.** `order-sign` is the primary hook. `order-select` is secondary: it never says documentation is needed, and it answers only the orders in `context.selections`.
 
@@ -665,6 +665,7 @@ flowchart TD
 | `Plan:Name` | `Behavioral Health Plan (synthetic)` | CRD cards | `source.label` on cards |
 | `AllowedHosts` | `localhost;127.0.0.1;[::1]` | host filtering | Set to the public host name in production. Not checked at start-up. |
 | `ServiceRequirements` | from `service-requirements.json` | `ServiceRequirementCatalog` | Array of services ([recipe 1](#1-add-or-change-a-service-that-needs-prior-authorization)) |
+| `Questionnaires` | from `service-requirements.json` | `ServiceRequirementCatalog` | Array of questionnaires that services share |
 | `Logging:*` | see appsettings | ASP.NET Core | EF command logging is at Warning |
 
 Environment variables use `__` in place of `:`. For example: `Auth__PublicBaseUrl=https://pa.example.gov`, `Database__Provider=SqlServer`, `ConnectionStrings__PriorAuth=...`.
@@ -689,7 +690,9 @@ tests/PriorAuth.Api.Tests/
 ├── SignInTests.cs               token endpoint, keys, scopes, replay, deactivation
 ├── CrdAndDtrTests.cs            CDS Hooks and DTR operations
 ├── ServerBoundaryTests.cs       internal guard, headers, negotiation, error bodies, /health
-└── DomainRuleTests.cs           no web server: catalog checks, matching, PlanClock, domain rules, mapper
+├── ReviewRuleTests.cs           $submit outcome and review type for each review rule
+├── ServiceRuleTests.cs          no web server: service list matching, modifiers, list validation
+└── DomainRuleTests.cs           no web server: PlanClock, domain rules, mapper
 ```
 
 How the harness works:
@@ -715,23 +718,38 @@ When you change what a valid PAS request is, change `PasFixtures.RequestBundle`,
 
 ### 1. Add or change a service that needs prior authorization
 
-Add an entry to the `ServiceRequirements` array in [service-requirements.json](../src/PriorAuth.Api/service-requirements.json):
+Add an entry to the `ServiceRequirements` array in [service-requirements.json](../src/PriorAuth.Api/service-requirements.json). A reviewed service names a questionnaire from the `Questionnaires` array; several services can share one.
 
 ```json
 {
   "System": "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets",
-  "Code": "H0032",
-  "Name": "Mental health service plan development",
-  "Program": "SMHS",
-  "Documentation": ["Current assessment"],
+  "Code": "H0019",
+  "Modifiers": ["U1"],
+  "Name": "ASAM level 3.1 clinically managed low-intensity residential treatment",
+  "Program": "DMC-ODS",
+  "Rule": "PriorAuthorization",
+  "Questionnaire": "dtr-dmcods-residential",
+  "CodeConfirmed": false,
+  "Source": "BHIN 24-001 p.9",
+  "Note": "Confirm the modifier against the DHCS billing manual."
+}
+```
+
+`Rule` is `PriorAuthorization`, `ConcurrentReview` or `NoPriorAuthorization`; the last never has a `Questionnaire`. A questionnaire looks like this:
+
+```json
+{
+  "Id": "dtr-dmcods-residential",
+  "Title": "DMC-ODS residential treatment",
+  "Status": "draft",
+  "Documentation": ["ASAM assessment or level of care screening"],
   "Questions": [
-    { "LinkId": "assessment-date", "Text": "Date of the most recent assessment", "Type": "date", "Required": true },
-    { "LinkId": "hours", "Text": "Requested hours per week", "Type": "choice", "Required": true, "Options": ["Up to 10", "11 to 20"] }
+    { "LinkId": "asam-level", "Text": "ASAM level of care requested", "Type": "choice", "Required": true, "Options": ["3.1", "3.3", "3.5"] }
   ]
 }
 ```
 
-Restart the service. If something is wrong, start-up fails with every problem listed. Changing a question's `LinkId`, or an option's text, changes what earlier answers mean: `OptionCode` is derived from the text. Bump `QuestionnaireBuilder.Version` when questions change in a way that matters. Versioned lists are not built yet (#1).
+Restart the service. If something is wrong, start-up fails with every problem listed. Changing a question's `LinkId`, or an option's text, changes what earlier answers mean: `OptionCode` is derived from the text. Bump `QuestionnaireBuilder.Version` when questions change in a way that matters. Versioned lists are not built yet (#1). Record where a rule comes from in `Source`, and update [9. The service list](09-service-list.md).
 
 ### 2. Add a FHIR endpoint
 
@@ -788,5 +806,6 @@ Add a `CdsService` entry, giving its id, hook, title and whether it is a primary
 8. **Running without the launch profile defaults to Production**, which requires `Auth:PublicBaseUrl`. Pass `--environment Development` after `--`.
 9. **The token signing key and the jti replay cache are per process.** A restart signs every client out, and more than one instance doesn't work yet (#14).
 10. **`LocalCallersOnly` is not authentication.** Don't run on a shared host (terminal server, Citrix), and don't put a same-machine proxy in front, until staff sign-in exists (#18).
-11. **Placeholder data.** `service-requirements.json` holds invented services (#1). Use only synthetic member data.
-12. **Not built:** PAS update and cancel (#28), subscriptions (deliberate), partial approvals (#24), priority and deadlines (#17), the PHI audit log (#19), US Core validation (#30). The full list is in [Status and open questions](04-status-and-open-questions.md) and the [audit report](07-audit-2026-11.md).
+11. **Unconfirmed service list.** `service-requirements.json` follows the DHCS notices, but entries with `"CodeConfirmed": false` and every draft questionnaire still need the plan's confirmation (#1, [9. The service list](09-service-list.md)). Use only synthetic member data.
+12. **Modifiers matter.** Entries can share a code and differ by modifier (`H0019` with `U1`, `U2`, `U3`). PAS reads modifiers from `Claim.item.modifier`; CRD orders carry none, so CRD may answer `conditional`.
+13. **Not built:** PAS update and cancel (#28), subscriptions (deliberate), partial approvals (#24), priority and deadlines (#17), the PHI audit log (#19), US Core validation (#30). The full list is in [Status and open questions](04-status-and-open-questions.md) and the [audit report](07-audit-2026-11.md).

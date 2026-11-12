@@ -38,7 +38,7 @@ public static class ReviewerEndpoints
                 .Select(r => new
                 {
                     r.Id, r.ProviderRequestId, r.ProviderName, r.MemberName, r.MemberIdentifier, r.ServiceCode, r.ServiceName,
-                    r.Status, r.AuthorizationNumber, r.AuthorizedThrough, r.Reason, r.ReceivedAtUtc, r.DecidedAtUtc, r.DecidedBy, r.Version,
+                    r.ReviewType, r.Status, r.AuthorizationNumber, r.AuthorizedThrough, r.Reason, r.ReceivedAtUtc, r.DecidedAtUtc, r.DecidedBy, r.Version,
                 })
                 .ToListAsync();
 
@@ -58,6 +58,7 @@ public static class ReviewerEndpoints
             return Results.Json(page.Select(r => new
             {
                 r.Id, r.ProviderRequestId, r.ProviderName, r.MemberName, r.MemberIdentifier, r.ServiceCode, r.ServiceName,
+                ReviewType = r.ReviewType?.ToString(),
                 Status = r.Status.ToString(),
                 IsOpen = r.Status is AuthorizationStatus.Pended or AuthorizationStatus.InformationRequested,
                 r.AuthorizationNumber, r.AuthorizedThrough, r.Reason, r.ReceivedAtUtc, r.DecidedAtUtc, r.DecidedBy, r.Version,

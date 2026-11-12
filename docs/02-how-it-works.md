@@ -136,7 +136,7 @@ flowchart TB
 | [Data/PriorAuthDb.cs](../src/PriorAuth.Api/Data/PriorAuthDb.cs) | The database mapping. |
 | [Data/DatabaseHealthCheck.cs](../src/PriorAuth.Api/Data/DatabaseHealthCheck.cs) | The database check behind `GET /health`. |
 | [Auth/](../src/PriorAuth.Api/Auth) | Sign-in for provider systems. See [5. Sign-in](05-sign-in.md). |
-| [service-requirements.json](../src/PriorAuth.Api/service-requirements.json) | The list of services needing approval, each with its code `System`. Placeholder content today. A broken entry (a code listed twice, a question id used twice, two answer options with the same code, an unknown question type) stops the service at start-up with a message naming the problem. |
+| [service-requirements.json](../src/PriorAuth.Api/service-requirements.json) | The plan's service list: each service's code, code system, modifiers, review rule and questionnaire, plus the shared questionnaires. See [9. The service list](09-service-list.md). A broken entry (a malformed code, the same code and modifiers twice, a reviewed service without a questionnaire, a question id used twice, two answer options with the same code) stops the service at start-up with a message naming the problem. |
 | [wwwroot/index.html](../src/PriorAuth.Api/wwwroot/index.html) | The reviewer screen. |
 
 ## What is stored

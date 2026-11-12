@@ -51,6 +51,7 @@ public class PriorAuthDb(DbContextOptions<PriorAuthDb> options) : DbContext(opti
         request.HasIndex(r => new { r.ClientId, r.ProviderRequestSystem, r.ProviderRequestId }).IsUnique();
         request.HasIndex(r => new { r.Status, r.ReceivedAtUtc });
         request.Property(r => r.Status).HasConversion<string>().HasMaxLength(32);
+        request.Property(r => r.ReviewType).HasConversion<string>().HasMaxLength(32);
         request.Property(r => r.Version).IsConcurrencyToken();
         request.HasMany(r => r.History).WithOne().HasForeignKey("AuthorizationRequestId").IsRequired();
         request.Navigation(r => r.History).UsePropertyAccessMode(PropertyAccessMode.Field);

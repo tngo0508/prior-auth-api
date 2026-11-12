@@ -101,6 +101,10 @@ namespace PriorAuth.Api.Data.Migrations
                     b.Property<DateTime>("ReceivedAtUtc")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("ReviewType")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
                     b.Property<string>("ServiceCode")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");

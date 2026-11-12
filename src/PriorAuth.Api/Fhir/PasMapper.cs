@@ -7,10 +7,11 @@ using PriorAuth.Api.Domain;
 namespace PriorAuth.Api.Fhir;
 
 /// <summary>What we need out of a Da Vinci PAS request Bundle.</summary>
+/// <param name="Service">What the plan's list says about the requested service, decided with the billing modifiers on the request line.</param>
 public record Submission(
     Bundle Bundle, Claim Claim, string ProviderRequestSystem, string ProviderRequestId,
     string MemberName, string? MemberIdentifier, string ServiceSystem, string ServiceCode, string? ServiceDisplay,
-    IReadOnlyList<NewDocument> Documents)
+    ServiceMatch Service, IReadOnlyList<NewDocument> Documents)
 {
     public RequestDetails Details(string clientId, string providerName, string serviceName) => new(
         clientId, ProviderRequestSystem, ProviderRequestId, providerName, MemberName, MemberIdentifier, ServiceSystem, ServiceCode, serviceName);
@@ -60,7 +61,10 @@ public static class PasMapper
         // rather than having the later lines silently dropped.
         if (claim.Item.Count == 0) return (null, "Claim.item must name the service requested.");
         if (claim.Item.Count > 1) return (null, "Send one service per request: this plan reviews each service separately, so Claim.item must have exactly one entry.");
-        var coding = catalog.Match(claim.Item[0].ProductOrService?.Coding).Coding;
+        // PAS carries billing modifiers on the line (Claim.item.modifier). A line with none has none, which also decides the match.
+        var modifiers = claim.Item[0].Modifier.SelectMany(m => m.Coding).Select(c => c.Code).Where(c => !string.IsNullOrWhiteSpace(c)).ToList();
+        var service = catalog.Match(claim.Item[0].ProductOrService?.Coding, modifiers);
+        var coding = service.Coding;
         if (string.IsNullOrWhiteSpace(coding?.Code)) return (null, "Claim.item.productOrService must carry a service code.");
         if (string.IsNullOrWhiteSpace(coding.System)) return (null, "Claim.item.productOrService.coding must state its code system (for example HCPCS or CPT).");
 
@@ -73,7 +77,7 @@ public static class PasMapper
         var (documents, documentError) = ReadDocuments(bundle, catalog);
         if (documentError is not null) return (null, documentError);
 
-        return (new Submission(bundle, claim, identifier.System ?? "", requestId, memberName, memberId, coding.System, coding.Code, coding.Display, documents), null);
+        return (new Submission(bundle, claim, identifier.System ?? "", requestId, memberName, memberId, coding.System, coding.Code.Trim(), coding.Display, service, documents), null);
     }
 
     /// <summary>Finds the resource a reference points to among the Bundle's entries, by fullUrl or by type/id.</summary>
@@ -129,22 +133,22 @@ public static class PasMapper
         foreach (var response in resources.OfType<QuestionnaireResponse>())
         {
             var questionnaireId = (response.Questionnaire ?? "").Split('|')[0].TrimEnd('/').Split('/').Last();
-            var requirement = catalog.FindByQuestionnaireId(questionnaireId);
+            var questionnaire = catalog.FindQuestionnaire(questionnaireId);
             var lines = new List<string>();
-            if (requirement is null)
+            if (questionnaire is null)
                 lines.Add($"Note: this answers questionnaire '{response.Questionnaire}', which is not one of the plan's questionnaires.");
             if (response.Status != QuestionnaireResponse.QuestionnaireResponseStatus.Completed)
                 lines.Add($"Note: the provider marked these answers '{response.Status?.ToString().ToLowerInvariant() ?? "no status"}', not completed.");
             var answered = new HashSet<string>();
             var answerLines = new List<string>();
-            WriteAnswers(response.Item, requirement, answerLines, answered, indent: "");
+            WriteAnswers(response.Item, questionnaire, answerLines, answered, indent: "");
             if (answerLines.Count == 0 && lines.Count == 0) continue;
-            var missing = requirement?.Questions.Where(q => q.Required && !answered.Contains(q.LinkId)).Select(q => q.Text).ToList() ?? [];
+            var missing = questionnaire?.Questions.Where(q => q.Required && !answered.Contains(q.LinkId)).Select(q => q.Text).ToList() ?? [];
             if (missing.Count > 0) lines.Add("Required questions not answered: " + string.Join("; ", missing));
             if (lines.Count > 0) lines.Add("");
             lines.AddRange(answerLines);
 
-            var title = $"Questionnaire answers: {requirement?.Name ?? questionnaireId}";
+            var title = $"Questionnaire answers: {questionnaire?.Title ?? questionnaireId}";
             var text = title + Environment.NewLine + Environment.NewLine + string.Join(Environment.NewLine, lines);
             documents.Add(new NewDocument(title, "text/plain", Encoding.UTF8.GetBytes(text)));
         }
@@ -154,19 +158,19 @@ public static class PasMapper
             : (documents, null);
     }
 
-    private static void WriteAnswers(List<QuestionnaireResponse.ItemComponent> items, ServiceRequirement? requirement, List<string> lines, HashSet<string> answered, string indent)
+    private static void WriteAnswers(List<QuestionnaireResponse.ItemComponent> items, QuestionnaireDefinition? questionnaire, List<string> lines, HashSet<string> answered, string indent)
     {
         foreach (var item in items)
         {
-            var planQuestion = requirement?.Questions.FirstOrDefault(q => q.LinkId == item.LinkId);
+            var planQuestion = questionnaire?.Questions.FirstOrDefault(q => q.LinkId == item.LinkId);
             var question = planQuestion?.Text ?? item.Text ?? item.LinkId;
             var answers = item.Answer.Select(a => AnswerText(a.Value, planQuestion)).Where(a => !string.IsNullOrWhiteSpace(a)).ToList();
             if (answers.Count > 0 && item.LinkId is not null) answered.Add(item.LinkId);
 
             if (answers.Count > 0 || item.Item.Count > 0)
                 lines.Add($"{indent}{question}: {(answers.Count > 0 ? string.Join("; ", answers) : "")}".TrimEnd());
-            WriteAnswers(item.Item, requirement, lines, answered, indent + "  ");
-            foreach (var answer in item.Answer) WriteAnswers(answer.Item, requirement, lines, answered, indent + "  ");
+            WriteAnswers(item.Item, questionnaire, lines, answered, indent + "  ");
+            foreach (var answer in item.Answer) WriteAnswers(answer.Item, questionnaire, lines, answered, indent + "  ");
         }
     }
 

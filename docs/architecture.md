@@ -369,7 +369,7 @@ These are the gaps that matter at the level of architecture. The full list with 
 | Patient Access and Provider Access APIs | Prior authorization data is not shared with them. |
 | 42 CFR Part 2 | Substance use disorder records get no special consent or redisclosure handling. |
 | CORS | Not enabled; browser-based provider applications cannot call the API directly. |
-| Real service list | The four services and their questions are invented placeholders. |
+| Confirmed service list | The list follows the DHCS notices, but some codes and all questionnaires await the plan's confirmation ([9. The service list](09-service-list.md)). |
 
 ## Where to go next
 

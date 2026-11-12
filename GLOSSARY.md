@@ -45,8 +45,20 @@ A Reviewer's approval or denial of an Authorization Request. An approval carries
 _Avoid_: Determination, adjudication, outcome
 
 **Service Requirement**:
-A covered service that needs authorization, identified by a code and its code system (HCPCS or CPT), together with the documentation and questions the plan requires for it. Drugs are never Service Requirements.
+An entry on the plan's service list: a service identified by its code, code system (HCPCS, CPT or NUBC revenue code) and any billing modifiers, with the Review Rule that applies to it and, when it is reviewed, the questionnaire that documents a request. Drugs are never Service Requirements.
 _Avoid_: Rule, policy, coverage rule
+
+**Review Rule**:
+What the plan does with a request for a Service Requirement: prior authorization (approval before the service), concurrent review (the stay is reviewed after admission), or no prior authorization (the plan may not require it). Set by the DHCS notices, not by the plan alone.
+_Avoid_: Policy, coverage rule
+
+**Review Type**:
+The kind of review an Authorization Request gets: prior authorization or concurrent review. Recorded on the request when it is received, from its service's Review Rule; empty when no review is needed. A request whose service the list cannot settle is pended as prior authorization for a person to check.
+_Avoid_: Request type, queue type
+
+**Concurrent Review**:
+Review of a psychiatric inpatient or PHF stay that has already started. The facility notifies the plan within 24 hours of admission; there is no approval beforehand (BHIN 22-017).
+_Avoid_: Retro review, notification
 
 **Plan Date**:
 The calendar date in the Behavioral Health Plan's time zone. "Today" for approvals, authorization numbers and coverage answers is always the Plan Date, never the UTC date.

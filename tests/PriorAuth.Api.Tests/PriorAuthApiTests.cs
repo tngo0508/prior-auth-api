@@ -95,7 +95,8 @@ public class PriorAuthApiTests(ApiFactory factory) : IClassFixture<ApiFactory>, 
         var list = await _client.GetFromJsonAsync<JsonElement>("/requirements?code=H2019");
 
         var requirement = Assert.Single(list.EnumerateArray());
-        Assert.Equal("Therapeutic Behavioral Services", requirement.GetProperty("name").GetString());
+        Assert.Equal("Therapeutic behavioral services (TBS)", requirement.GetProperty("name").GetString());
+        Assert.Equal("PriorAuthorization", requirement.GetProperty("rule").GetString());
         Assert.NotEmpty(requirement.GetProperty("documentation").EnumerateArray());
     }
 

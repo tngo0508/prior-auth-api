@@ -29,8 +29,21 @@ public static class FhirEndpoints
         // This is the plan's published list, for people and simple tools; EHRs use CRD and DTR for the same information.
         app.MapGet("/requirements", (string? code, string? system, ServiceRequirementCatalog catalog) =>
             Results.Json(catalog.All.Where(r =>
-                (code is null || r.Code.Equals(code, StringComparison.OrdinalIgnoreCase)) &&
-                (system is null || r.System.Equals(system, StringComparison.Ordinal)))));
+                    (code is null || r.Code.Equals(code.Trim(), StringComparison.OrdinalIgnoreCase)) &&
+                    (system is null || r.System.Equals(system, StringComparison.Ordinal)))
+                .Select(r =>
+                {
+                    var questionnaire = catalog.FindQuestionnaire(r.Questionnaire);
+                    return new
+                    {
+                        r.System, r.Code, r.Modifiers, r.Name, r.Program,
+                        Rule = r.Rule.ToString(),
+                        r.CodeConfirmed, r.Source, r.Note,
+                        Questionnaire = questionnaire?.Id,
+                        QuestionnaireStatus = questionnaire?.Status,
+                        Documentation = questionnaire?.Documentation ?? [],
+                    };
+                })));
 
         // Da Vinci PAS: submit a prior authorization request.
         app.MapPost("/fhir/Claim/$submit", async (HttpRequest http, ClaimsPrincipal user, IConfiguration config, FhirJson fhir,
@@ -45,7 +58,8 @@ public static class FhirEndpoints
             var (submission, error) = PasMapper.ReadSubmission(bundle!, catalog);
             if (error is not null) return fhir.Problem(error);
 
-            var requirement = catalog.Find(submission!.ServiceSystem, submission.ServiceCode);
+            var (review, note) = submission!.Service.ReviewForRequest();
+            var requirement = submission.Service.Requirement;
             // The registered name is recorded, not the one the request claims.
             var details = submission.Details(client.ClientId, client.Name, requirement?.Name ?? submission.ServiceDisplay ?? submission.ServiceCode);
             var storedJson = fhir.Write(PasMapper.WithoutDocumentContents(bundle!));
@@ -54,7 +68,7 @@ public static class FhirEndpoints
             var request = await Find(db, client.ClientId, submission.ProviderRequestSystem, submission.ProviderRequestId);
             if (request is null)
             {
-                request = AuthorizationRequest.Receive(details, authorizationRequired: requirement is not null, storedJson, submission.Documents, now);
+                request = AuthorizationRequest.Receive(details, review, note, storedJson, submission.Documents, now);
                 db.AuthorizationRequests.Add(request);
                 try
                 {

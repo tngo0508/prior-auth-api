@@ -14,6 +14,15 @@ public enum AuthorizationStatus
     NotRequired,
 }
 
+/// <summary>What kind of review a request gets.</summary>
+public enum ReviewType
+{
+    /// <summary>Approval before the service is given.</summary>
+    PriorAuthorization,
+    /// <summary>Review of an admission or stay that has already started (psychiatric inpatient and PHF, BHIN 22-017).</summary>
+    ConcurrentReview,
+}
+
 /// <summary>Thrown when an action would break a rule of the authorization process.</summary>
 public class DomainRuleException(string message) : Exception(message);
 
@@ -51,6 +60,8 @@ public class AuthorizationRequest
     /// <summary>The FHIR Bundle as the provider first sent it, with document contents removed (they are kept once, in <see cref="Documents"/>).</summary>
     public string SubmittedBundleJson { get; private set; } = "";
     public DateTime ReceivedAtUtc { get; private set; }
+    /// <summary>The kind of review the request gets. Null when the service needs none.</summary>
+    public ReviewType? ReviewType { get; private set; }
     public AuthorizationStatus Status { get; private set; }
     public string? AuthorizationNumber { get; private set; }
     public DateOnly? AuthorizedThrough { get; private set; }
@@ -70,8 +81,10 @@ public class AuthorizationRequest
 
     public bool IsOpen => Status is AuthorizationStatus.Pended or AuthorizationStatus.InformationRequested;
 
+    /// <param name="review">The review the service gets, or null when the service needs none and the request is answered at once.</param>
+    /// <param name="note">Anything the reviewer or the record should know about how the service was read, added to the first history entry.</param>
     public static AuthorizationRequest Receive(
-        RequestDetails details, bool authorizationRequired,
+        RequestDetails details, ReviewType? review, string? note,
         string submittedBundleJson, IReadOnlyCollection<NewDocument> documents, DateTime nowUtc)
     {
         var request = new AuthorizationRequest
@@ -88,11 +101,16 @@ public class AuthorizationRequest
             ServiceName = details.ServiceName,
             SubmittedBundleJson = submittedBundleJson,
             ReceivedAtUtc = nowUtc,
-            Status = authorizationRequired ? AuthorizationStatus.Pended : AuthorizationStatus.NotRequired,
+            ReviewType = review,
+            Status = review is null ? AuthorizationStatus.NotRequired : AuthorizationStatus.Pended,
         };
-        request.Record(nowUtc, details.ProviderName, authorizationRequired
-            ? "Received. Pended for review."
-            : "Received. The service does not require prior authorization.");
+        var received = review switch
+        {
+            Domain.ReviewType.PriorAuthorization => "Received. Pended for review.",
+            Domain.ReviewType.ConcurrentReview => "Received. Pended for concurrent review.",
+            _ => "Received. The service does not require prior authorization.",
+        };
+        request.Record(nowUtc, details.ProviderName, note is null ? received : $"{received} {note}");
         request.Attach(documents, details.ProviderName, nowUtc);
         return request;
     }

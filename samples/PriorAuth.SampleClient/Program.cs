@@ -197,10 +197,12 @@ static string RequestBundle(string requestId, string code, string questionnaireU
             "questionnaire": "{{questionnaireUrl}}",
             "status": "completed",
             "item": [
+              { "linkId": "under-21", "answer": [{ "valueBoolean": true }] },
               { "linkId": "assessment-date", "answer": [{ "valueDate": "2026-10-30" }] },
+              { "linkId": "diagnosis", "answer": [{ "valueString": "Synthetic example diagnosis." }] },
               { "linkId": "target-behaviours", "answer": [{ "valueString": "Synthetic example: elopement and aggression at school." }] },
               { "linkId": "placement-risk", "answer": [{ "valueBoolean": true }] },
-              { "linkId": "hours-per-week", "answer": [{ "valueCoding": { "system": "{{questionnaireUrl.Split("/fhir/")[0]}}/fhir/CodeSystem/prior-auth-answers", "code": "11-to-20", "display": "11 to 20" } }] }
+              { "linkId": "amount-requested", "answer": [{ "valueString": "10 hours per week" }] }
             ]
           }
         }

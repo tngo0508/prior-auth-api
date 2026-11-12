@@ -17,7 +17,7 @@ namespace PriorAuth.Api.Crd;
 /// order-sign is a CRD "primary" hook: every checked order gets coverage information, including what
 /// documentation is needed. order-select is "secondary": it answers only the orders in context.selections
 /// and never says that documentation or information is needed (CRD 2.0.1 hooks.html).
-/// This service does not check whether the member is eligible; see the "covered" value below.
+/// This service does not check whether the member is enrolled, so "covered" is always "conditional".
 /// </summary>
 public static class CrdEndpoints
 {
@@ -146,8 +146,16 @@ public static class CrdEndpoints
 
         private void AnswerOrder(ServiceRequest order)
         {
-            var (requirement, coding) = catalog.Match(order.Code?.Coding);
-            var service = requirement is null ? coding?.Code ?? "the ordered service" : $"{requirement.Code} {requirement.Name}";
+            // Orders carry no billing modifiers, so entries that differ only by modifier are answered together.
+            var match = catalog.Match(order.Code?.Coding, modifiers: null);
+            var requirement = match.Requirement;
+            var service = match.Kind switch
+            {
+                // Entries that differ only by modifier and agree on the answer (H2012) are named together.
+                MatchKind.Listed => $"{match.Coding!.Code.Trim()} {string.Join(" or ", match.Candidates.Select(c => c.Name))}",
+                MatchKind.Ambiguous => $"{match.Coding!.Code} ({string.Join(" or ", match.Candidates.Select(c => c.Name))})",
+                _ => match.Coding?.Code ?? "the ordered service",
+            };
             var orderName = $"{Describe(order)} ({service})";
 
             // The CRD ServiceRequest profile requires authoredOn and requester. The order is echoed back in the update,
@@ -176,19 +184,22 @@ public static class CrdEndpoints
                 return;
             }
 
+            var verdict = Decide(match, baseUrl);
             var information = new Extension { Url = CoverageInformationUrl };
             information.Extension.Add(new Extension("coverage", new ResourceReference(coverage.Reference)));
-            // "covered" is stated only for services on the plan's list. For anything else this service
-            // does not know, so it says "conditional" and never asserts coverage it has not checked.
-            information.Extension.Add(new Extension("covered", new Code(requirement is null ? "conditional" : "covered")));
-            information.Extension.Add(new Extension("pa-needed", new Code(requirement is null ? "no-auth" : "auth-needed")));
+            // This service does not check enrolment, so it never asserts coverage: "conditional" on the member's
+            // enrolment in the plan's program, for every answer.
+            information.Extension.Add(new Extension("covered", new Code("conditional")));
+            information.Extension.Add(new Extension("pa-needed", new Code(verdict.PaNeeded)));
             // Secondary hooks (order-select) SHALL NOT say that clinical or administrative information is needed.
-            if (requirement is not null && primaryHook)
+            if (verdict.Questionnaire is not null && primaryHook)
             {
                 information.Extension.Add(new Extension("doc-needed", new Code("clinical")));
                 information.Extension.Add(new Extension("doc-purpose", new Code("withpa")));
-                information.Extension.Add(new Extension("questionnaire", new Canonical(QuestionnaireBuilder.Url(requirement, baseUrl))));
+                information.Extension.Add(new Extension("questionnaire", new Canonical(verdict.Questionnaire)));
             }
+            if (verdict.Reason is not null)
+                information.Extension.Add(new Extension("reason", new CodeableConcept { Text = verdict.Reason }));
 
             var existing = order.Extension.Where(e => e.Url == CoverageInformationUrl && CoverageOf(e) == coverage.Reference).ToList();
             // CRD: do not send an update unless something is new.
@@ -204,11 +215,44 @@ public static class CrdEndpoints
             _actions.Add(new JsonObject
             {
                 ["type"] = "update",
-                ["description"] = requirement is null
-                    ? $"No prior authorization is needed for {service}."
-                    : $"Prior authorization is needed for {service}.",
+                ["description"] = verdict.PaNeeded switch
+                {
+                    "auth-needed" => $"Prior authorization is needed for {service}.",
+                    "no-auth" => $"No prior authorization is needed for {service}.",
+                    _ => $"Whether prior authorization is needed for {service} could not be decided.",
+                },
                 ["resource"] = JsonNode.Parse(fhir.Write(order)),
             });
+        }
+
+        private sealed record Verdict(string PaNeeded, string? Questionnaire, string? Reason);
+
+        /// <summary>What CRD says about one order, from the rule on the plan's list.</summary>
+        private static Verdict Decide(ServiceMatch match, string baseUrl)
+        {
+            switch (match.Kind)
+            {
+                case MatchKind.Listed:
+                    var requirement = match.Requirement!;
+                    return requirement.Rule switch
+                    {
+                        ReviewRule.PriorAuthorization => new Verdict("auth-needed", QuestionnaireBuilder.Url(requirement.Questionnaire!, baseUrl), null),
+                        ReviewRule.ConcurrentReview => new Verdict("no-auth", null,
+                            "No prior authorization is needed: the stay is reviewed concurrently. Notify the plan within 24 hours of admission " +
+                            $"by sending the admission through $submit, with questionnaire {QuestionnaireBuilder.Url(requirement.Questionnaire!, baseUrl)}."),
+                        _ => new Verdict("no-auth", null, ServiceRequirement.MayNotRequire),
+                    };
+                case MatchKind.Ambiguous:
+                    var needing = match.Candidates.Where(c => c.Rule != ReviewRule.NoPriorAuthorization).Select(c => c.Describe()).ToList();
+                    return new Verdict("conditional", null,
+                        $"Whether prior authorization is needed depends on the billing modifier. Needs review: {string.Join(", ", needing)}. " +
+                        "Other modifiers: no prior authorization.");
+                case MatchKind.NotListed:
+                    return new Verdict("no-auth", null, "The service is not on the plan's list of services that need prior authorization.");
+                default:
+                    return new Verdict("conditional", null,
+                        "The service code or its code system was not recognised, so the plan cannot say whether prior authorization is needed. Check the code or contact the plan.");
+            }
         }
 
         /// <summary>

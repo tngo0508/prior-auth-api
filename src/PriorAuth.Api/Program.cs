@@ -20,8 +20,13 @@ builder.Services.AddDbContext<PriorAuthDb>((services, options) =>
 builder.Services.AddSingleton<FhirJson>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<PlanClock>();
-builder.Services.AddSingleton(services => new ServiceRequirementCatalog(
-    services.GetRequiredService<IConfiguration>().GetSection("ServiceRequirements").Get<ServiceRequirement[]>() ?? []));
+builder.Services.AddSingleton(services =>
+{
+    var config = services.GetRequiredService<IConfiguration>();
+    return new ServiceRequirementCatalog(
+        config.GetSection("ServiceRequirements").Get<ServiceRequirement[]>() ?? [],
+        config.GetSection("Questionnaires").Get<QuestionnaireDefinition[]>() ?? []);
+});
 builder.Services.AddProviderSignIn();
 builder.Services.AddHealthChecks().AddCheck<DatabaseHealthCheck>("database");
 builder.WebHost.ConfigureKestrel(kestrel => kestrel.AddServerHeader = false);

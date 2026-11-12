@@ -6,23 +6,16 @@ namespace PriorAuth.Api.Tests;
 /// <summary>Rules that hold without a web server: the service list's own checks, matching, and the plan's calendar.</summary>
 public class DomainRuleTests
 {
-    private static ServiceRequirement Service(string code, string system = CodeSystems.Hcpcs, params RequirementQuestion[] questions) =>
-        new() { Code = code, System = system, Name = "Service " + code, Questions = questions };
-
-    [Fact]
-    public void A_service_list_with_the_same_code_twice_stops_start_up()
-    {
-        var error = Assert.Throws<InvalidOperationException>(() => new ServiceRequirementCatalog([Service("H2019"), Service("h2019")]));
-
-        Assert.Contains("listed more than once", error.Message);
-    }
+    private static ServiceRequirementCatalog WithQuestion(RequirementQuestion question) => new(
+        [new ServiceRequirement { Code = "H2019", Name = "TBS", Rule = ReviewRule.PriorAuthorization, Questionnaire = "dtr-q" }],
+        [new QuestionnaireDefinition { Id = "dtr-q", Title = "Q", Questions = [question] }]);
 
     [Fact]
     public void Choice_options_whose_codes_would_collide_stop_start_up()
     {
         var question = new RequirementQuestion { LinkId = "q", Text = "Q", Type = "choice", Options = ["<5", ">5"] };
 
-        var error = Assert.Throws<InvalidOperationException>(() => new ServiceRequirementCatalog([Service("H2019", questions: question)]));
+        var error = Assert.Throws<InvalidOperationException>(() => WithQuestion(question));
 
         Assert.Contains("share the code", error.Message);
     }
@@ -32,28 +25,7 @@ public class DomainRuleTests
     {
         var question = new RequirementQuestion { LinkId = "q", Text = "Q", Type = "number" };
 
-        Assert.Throws<InvalidOperationException>(() => new ServiceRequirementCatalog([Service("H2019", questions: question)]));
-    }
-
-    [Fact]
-    public void A_code_only_matches_in_its_own_code_system()
-    {
-        var catalog = new ServiceRequirementCatalog([Service("H2019")]);
-
-        Assert.NotNull(catalog.Find(CodeSystems.Hcpcs, "H2019"));
-        Assert.Null(catalog.Find("http://example.org/local-codes", "H2019"));
-        Assert.Null(catalog.Find(null, "H2019"));
-    }
-
-    [Fact]
-    public void The_first_listed_coding_decides_the_service_wherever_it_sits()
-    {
-        var catalog = new ServiceRequirementCatalog([Service("H2019")]);
-
-        var (requirement, coding) = catalog.Match([new(CodeSystems.Cpt, "90834"), new(CodeSystems.Hcpcs, "H2019")]);
-
-        Assert.Equal("H2019", requirement?.Code);
-        Assert.Equal("H2019", coding?.Code);
+        Assert.Throws<InvalidOperationException>(() => WithQuestion(question));
     }
 
     [Fact]
@@ -113,7 +85,7 @@ public class DomainRuleTests
 
     private static AuthorizationRequest Pended() => AuthorizationRequest.Receive(
         new RequestDetails("client", "", "REQ-1", "Clinic", "Alex Testpatient", "sys|1", CodeSystems.Hcpcs, "H2019", "TBS"),
-        authorizationRequired: true, "{}", [], DateTime.UtcNow);
+        ReviewType.PriorAuthorization, note: null, "{}", [], DateTime.UtcNow);
 
     private sealed class FixedTime(DateTimeOffset now) : TimeProvider
     {

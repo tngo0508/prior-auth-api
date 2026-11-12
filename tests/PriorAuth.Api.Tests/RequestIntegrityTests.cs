@@ -250,10 +250,10 @@ public class RequestIntegrityTests(ApiFactory factory) : IClassFixture<ApiFactor
     {
         var answers = """
             { "fullUrl": "urn:uuid:55555555-5555-5555-5555-555555555555",
-              "resource": { "resourceType": "QuestionnaireResponse", "questionnaire": "http://localhost/fhir/Questionnaire/prior-auth-h2019|1", "status": "in-progress",
+              "resource": { "resourceType": "QuestionnaireResponse", "questionnaire": "http://localhost/fhir/Questionnaire/dtr-mhp-day-treatment|1", "status": "in-progress",
                 "item": [
-                  { "linkId": "hours-per-week", "answer": [{ "valueCoding": { "code": "11-to-20", "display": "whatever the EHR says" } }] },
-                  { "linkId": "transition-plan", "answer": [{ "valueQuantity": { "value": 6, "unit": "weeks" } }] }
+                  { "linkId": "schedule", "answer": [{ "valueCoding": { "code": "full-day", "display": "whatever the EHR says" } }] },
+                  { "linkId": "days-per-week", "answer": [{ "valueQuantity": { "value": 3, "unit": "days" } }] }
                 ] } }
             """;
         var id = ClaimResponse(await Submit(PasFixtures.RequestBundle(NewId(), extraEntries: answers))).GetProperty("id").GetString()!;
@@ -261,8 +261,8 @@ public class RequestIntegrityTests(ApiFactory factory) : IClassFixture<ApiFactor
         var document = Assert.Single((await QueueEntry(id)).GetProperty("documents").EnumerateArray());
         var text = await _staff.GetStringAsync($"/internal/requests/{id}/documents/{document.GetProperty("id").GetString()}");
 
-        Assert.Contains("Requested hours per week: 11 to 20", text);
-        Assert.Contains("Transition plan: 6 weeks", text);
+        Assert.Contains("Program schedule: Full day", text);
+        Assert.Contains("Days per week requested: 3 days", text);
         Assert.Contains("not completed", text);
         Assert.Contains("Required questions not answered: Date of the most recent assessment", text);
     }

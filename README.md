@@ -18,7 +18,7 @@ It lets a contracted provider's software ask the plan for approval before delive
 | Reviewer queue | Working, but reviewers do not sign in; it only answers on the server's own machine |
 | SQL Server with migrations | Working |
 | Staff sign-in, hosting, conformance testing | Not started |
-| Service list and questions | Invented placeholders |
+| Service list and questions | Built from the DHCS notices; codes and questionnaires await the plan's confirmation |
 
 Do not put real member information in it. See [status and open questions](docs/04-status-and-open-questions.md) for what is missing and what was assumed.
 
@@ -88,6 +88,7 @@ Start with the architecture overview for the whole system on one page, then the 
 | [6. Asking first: CRD and DTR](docs/06-crd-and-dtr.md) | How an EHR learns that approval is needed and what to send |
 | [7. November 2026 audit](docs/07-audit-2026-11.md) | What the audit against the CMS workflow found, and what was fixed |
 | [8. Codebase guide for developers](docs/08-codebase-guide.md) | Start-up, pipeline, every endpoint and class, data mapping, sign-in and CRD/DTR internals, tests, recipes and traps |
+| [9. The service list](docs/09-service-list.md) | Which services need approval, the DHCS sources, how codes and modifiers are matched, and what the plan must confirm |
 | [GLOSSARY.md](GLOSSARY.md) | The project's business terms |
 
 For developers of provider systems, the running service also serves a guide at `/developers.html`.
@@ -113,7 +114,7 @@ Inside the service:
 | `Review` | The reviewer queue and decisions |
 | `Auth` | Registration and sign-in for provider systems |
 | `Data` | Database mapping and migrations |
-| `service-requirements.json` | The services that need approval (each with its code system), their paperwork and questions. Checked at start-up: a duplicate code, question id or answer option stops the service from starting |
+| `service-requirements.json` | The plan's service list: each service's code, modifiers, review rule (prior authorization, concurrent review or none) and questionnaire, and the shared questionnaires. Checked at start-up: a malformed code, a duplicate entry or a missing questionnaire stops the service from starting |
 
 ## Technology
 
