@@ -13,7 +13,7 @@ It lets a contracted provider's software ask the plan for approval before delive
 | Submit a request, check status, read the answer (Da Vinci PAS) | Working: one service per request; no update, cancel or appeal |
 | Ask whether an order needs approval (Da Vinci CRD) | Working, basic: two of six hooks, no eligibility check |
 | Download the questionnaire for a service (Da Vinci DTR) | Working, basic: no automatic filling of answers |
-| Sign-in for provider systems (SMART Backend Services) | Working |
+| Sign-in for provider systems (SMART Backend Services) | Working: one server instance only; keys registered as a fixed set, no JWKS URL |
 | Supporting documents | Working |
 | Reviewer queue | Working, but reviewers do not sign in; it only answers on the server's own machine |
 | SQL Server with migrations | Working |
