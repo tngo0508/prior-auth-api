@@ -53,7 +53,7 @@ public static class QuestionnaireBuilder
                 },
                 AnswerOption = q.Options.Select(option => new Questionnaire.AnswerOptionComponent
                 {
-                    Value = new Coding(answerSystem, Slug(option), option),
+                    Value = new Coding(answerSystem, RequirementQuestion.OptionCode(option), option),
                 }).ToList(),
             }).ToList(),
         };
@@ -84,7 +84,4 @@ public static class QuestionnaireBuilder
             ],
         };
     }
-
-    private static string Slug(string text) =>
-        new string(text.ToLowerInvariant().Select(c => char.IsLetterOrDigit(c) ? c : '-').ToArray()).Trim('-');
 }

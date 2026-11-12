@@ -4,7 +4,7 @@ using PriorAuth.Api.Domain;
 namespace PriorAuth.Api.Fhir;
 
 /// <summary>What we need out of a Da Vinci PAS request Bundle.</summary>
-public record Submission(Claim Claim, string ProviderRequestId, string ProviderName, string MemberName, string ServiceCode, string? ServiceDisplay, IReadOnlyList<NewDocument> Documents);
+public record Submission(Claim Claim, string ProviderRequestId, string ProviderName, string MemberName, string? ServiceSystem, string ServiceCode, string? ServiceDisplay, IReadOnlyList<NewDocument> Documents);
 
 /// <summary>
 /// Translates between FHIR (Da Vinci Prior Authorization Support) and the domain model.
@@ -29,7 +29,7 @@ public static class PasMapper
         // PAS requires the insurer on the request, and the response must echo it.
         if (claim.Insurer is null) return (null, "Claim.insurer must identify the plan the request is addressed to.");
 
-        var coding = claim.Item.FirstOrDefault()?.ProductOrService?.Coding.FirstOrDefault();
+        var coding = catalog.Match(claim.Item.FirstOrDefault()?.ProductOrService?.Coding).Coding;
         if (string.IsNullOrWhiteSpace(coding?.Code)) return (null, "Claim.item[0].productOrService must carry a service code.");
 
         var patient = bundle.Entry.Select(e => e.Resource).OfType<Patient>().FirstOrDefault();
@@ -39,7 +39,7 @@ public static class PasMapper
         var (documents, documentError) = ReadDocuments(bundle, catalog);
         if (documentError is not null) return (null, documentError);
 
-        return (new Submission(claim, requestId, providerName, memberName, coding.Code, coding.Display, documents), null);
+        return (new Submission(claim, requestId, providerName, memberName, coding.System, coding.Code, coding.Display, documents), null);
     }
 
     /// <summary>Supporting paperwork arrives as DocumentReference resources with the file inline.</summary>

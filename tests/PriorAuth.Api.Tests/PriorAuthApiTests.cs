@@ -307,33 +307,6 @@ public class PriorAuthApiTests(ApiFactory factory) : IClassFixture<ApiFactory>, 
         claimResponse.GetProperty("item")[0].GetProperty("adjudication")[0].GetProperty("extension")[0]
             .GetProperty("extension")[0].GetProperty("valueCodeableConcept").GetProperty("coding")[0].GetProperty("code").GetString();
 
-    private static string RequestBundle(string requestId, string serviceCode, string use = "preauthorization") => $$"""
-        {
-          "resourceType": "Bundle",
-          "type": "collection",
-          "entry": [
-            {
-              "fullUrl": "urn:uuid:11111111-1111-1111-1111-111111111111",
-              "resource": {
-                "resourceType": "Claim",
-                "identifier": [{ "system": "http://example.org/provider/claim-id", "value": "{{requestId}}" }],
-                "status": "active",
-                "type": { "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/claim-type", "code": "professional" }] },
-                "use": "{{use}}",
-                "patient": { "reference": "urn:uuid:22222222-2222-2222-2222-222222222222" },
-                "created": "2026-11-11",
-                "insurer": { "display": "County Behavioral Health Plan (synthetic)" },
-                "provider": { "display": "Example Clinic (synthetic)" },
-                "priority": { "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/processpriority", "code": "normal" }] },
-                "insurance": [{ "sequence": 1, "focal": true, "coverage": { "display": "Synthetic coverage" } }],
-                "item": [{ "sequence": 1, "productOrService": { "coding": [{ "code": "{{serviceCode}}" }] } }]
-              }
-            },
-            {
-              "fullUrl": "urn:uuid:22222222-2222-2222-2222-222222222222",
-              "resource": { "resourceType": "Patient", "name": [{ "family": "Testpatient", "given": ["Alex"] }] }
-            }
-          ]
-        }
-        """;
+    private static string RequestBundle(string requestId, string serviceCode, string use = "preauthorization") =>
+        PasFixtures.RequestBundle(requestId, serviceCode, use);
 }

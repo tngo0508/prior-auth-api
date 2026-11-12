@@ -18,11 +18,17 @@ builder.Services.AddDbContext<PriorAuthDb>((services, options) =>
     PriorAuthDb.Configure(options, services.GetRequiredService<IConfiguration>()));
 builder.Services.AddSingleton<FhirJson>();
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<PlanClock>();
 builder.Services.AddSingleton(services => new ServiceRequirementCatalog(
     services.GetRequiredService<IConfiguration>().GetSection("ServiceRequirements").Get<ServiceRequirement[]>() ?? []));
 builder.Services.AddProviderSignIn();
 
 var app = builder.Build();
+
+// Build and check the service list and the plan clock now, so a broken file or time zone stops start-up
+// instead of failing every call.
+app.Services.GetRequiredService<ServiceRequirementCatalog>();
+app.Services.GetRequiredService<PlanClock>();
 
 using (var scope = app.Services.CreateScope())
 {

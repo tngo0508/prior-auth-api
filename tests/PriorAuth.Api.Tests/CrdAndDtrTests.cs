@@ -263,29 +263,6 @@ public class CrdAndDtrTests(ApiFactory factory) : IClassFixture<ApiFactory>, IAs
         }
         """;
 
-    private static string RequestBundle(string requestId, string extraEntry) => $$"""
-        {
-          "resourceType": "Bundle",
-          "type": "collection",
-          "entry": [
-            {
-              "resource": {
-                "resourceType": "Claim",
-                "identifier": [{ "value": "{{requestId}}" }],
-                "status": "active",
-                "type": { "coding": [{ "code": "professional" }] },
-                "use": "preauthorization",
-                "patient": { "display": "Synthetic Patient" },
-                "created": "2026-11-11",
-                "insurer": { "display": "County Behavioral Health Plan (synthetic)" },
-                "provider": { "display": "Example Clinic (synthetic)" },
-                "priority": { "coding": [{ "code": "normal" }] },
-                "insurance": [{ "sequence": 1, "focal": true, "coverage": { "display": "Synthetic coverage" } }],
-                "item": [{ "sequence": 1, "productOrService": { "coding": [{ "code": "H2019" }] } }]
-              }
-            },
-            {{extraEntry}}
-          ]
-        }
-        """;
+    private static string RequestBundle(string requestId, string extraEntry) =>
+        PasFixtures.RequestBundle(requestId, extraEntries: extraEntry);
 }

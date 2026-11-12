@@ -78,9 +78,8 @@ public static class CrdEndpoints
 
             foreach (var order in orders!.Entry.Select(e => e.Resource).OfType<ServiceRequest>())
             {
-                var codes = order.Code?.Coding.Select(c => c.Code).ToList() ?? [];
-                var requirement = codes.Select(catalog.Find).FirstOrDefault(r => r is not null);
-                var label = requirement is null ? codes.FirstOrDefault() ?? "the ordered service" : $"{requirement.Code} {requirement.Name}";
+                var (requirement, coding) = catalog.Match(order.Code?.Coding);
+                var label = requirement is null ? coding?.Code ?? "the ordered service" : $"{requirement.Code} {requirement.Name}";
 
                 var coverage = order.Insurance.FirstOrDefault() ?? prefetchedCoverage;
                 if (coverage is null)

@@ -37,7 +37,7 @@ public static class FhirEndpoints
                 r.ClientId == client.ClientId && r.ProviderRequestId == submission!.ProviderRequestId);
             if (request is null)
             {
-                var requirement = catalog.Find(submission!.ServiceCode);
+                var requirement = catalog.Find(submission!.ServiceSystem, submission.ServiceCode);
                 request = AuthorizationRequest.Receive(
                     client.ClientId, submission.ProviderRequestId,
                     providerName: client.Name, // the registered name, not the one the request claims

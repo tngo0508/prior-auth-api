@@ -40,7 +40,7 @@ public static class DtrEndpoints
                 }
                 else if (parameter.Name == "order" && parameter.Resource is ServiceRequest order)
                 {
-                    var requirement = order.Code?.Coding.Select(c => catalog.Find(c.Code)).FirstOrDefault(r => r is not null);
+                    var requirement = catalog.Match(order.Code?.Coding).Requirement;
                     if (requirement is not null) wanted.Add((requirement, order.Subject));
                 }
             }

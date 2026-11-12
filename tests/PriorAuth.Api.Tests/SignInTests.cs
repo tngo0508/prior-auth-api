@@ -213,28 +213,6 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
 
     private static StringContent Fhir(string json) => new(json, Encoding.UTF8, "application/fhir+json");
 
-    private static string RequestBundle(string requestId) => $$"""
-        {
-          "resourceType": "Bundle",
-          "type": "collection",
-          "entry": [
-            {
-              "resource": {
-                "resourceType": "Claim",
-                "identifier": [{ "value": "{{requestId}}" }],
-                "status": "active",
-                "type": { "coding": [{ "code": "professional" }] },
-                "use": "preauthorization",
-                "patient": { "display": "Synthetic Patient" },
-                "created": "2026-11-11",
-                "insurer": { "display": "County Behavioral Health Plan (synthetic)" },
-                "provider": { "display": "A Name The Request Claims" },
-                "priority": { "coding": [{ "code": "normal" }] },
-                "insurance": [{ "sequence": 1, "focal": true, "coverage": { "display": "Synthetic coverage" } }],
-                "item": [{ "sequence": 1, "productOrService": { "coding": [{ "code": "H2019" }] } }]
-              }
-            }
-          ]
-        }
-        """;
+    private static string RequestBundle(string requestId) =>
+        PasFixtures.RequestBundle(requestId, provider: "A Name The Request Claims");
 }
