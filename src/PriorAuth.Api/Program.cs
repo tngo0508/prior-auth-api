@@ -117,7 +117,16 @@ app.UseAuthorization();
 app.UseStatusCodePages(async context =>
 {
     var http = context.HttpContext;
-    if (!http.Request.Path.StartsWithSegments("/fhir")) return;
+    var path = http.Request.Path;
+    // Windows sign-in answers a portal page the person has no role for with a bare 403. Show them who to ask instead.
+    // (The Development sign-in redirects there itself.)
+    if (http.Response.StatusCode == StatusCodes.Status403Forbidden && HttpMethods.IsGet(http.Request.Method)
+        && !path.StartsWithSegments("/internal") && !path.StartsWithSegments("/fhir") && !path.StartsWithSegments("/auth") && !path.StartsWithSegments("/cds-services"))
+    {
+        http.Response.Redirect("/no-access");
+        return;
+    }
+    if (!path.StartsWithSegments("/fhir")) return;
     var status = http.Response.StatusCode;
     var message = status switch
     {

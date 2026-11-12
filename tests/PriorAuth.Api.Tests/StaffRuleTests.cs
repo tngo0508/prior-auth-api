@@ -150,6 +150,28 @@ public class StaffRuleTests
         Assert.Null(request.AssignedTo);
     }
 
+    [Fact]
+    public void What_the_page_offers_matches_what_the_rules_allow()
+    {
+        var request = Pended(ReviewType.ConcurrentReview);
+        request.Claim(Clinician, Now);
+
+        Assert.False(request.MayBeDecidedBy(Clinician)); // a concurrent review is for a physician
+        Assert.False(request.MayBeDecidedBy(Physician)); // Lee holds it
+        Assert.False(request.MayBeClaimedBy(Physician));
+        Assert.True(request.MayBeReleasedBy(Coordinator));
+        Assert.False(request.MayBeReleasedBy(OtherClinician));
+        Assert.True(request.MayBeAssignedBy(Coordinator));
+        Assert.False(request.MayBeAssignedBy(Clinician));
+
+        request.RequestInformation("Client plan", Clinician, Now);
+
+        // Still open while waiting for the provider, so the holder may ask again, and the rule agrees.
+        Assert.True(request.MayBeAskedForInformationBy(Clinician));
+        request.RequestInformation("Client plan and the latest assessment", Clinician, Now);
+        Assert.False(request.MayBeAskedForInformationBy(Admin));
+    }
+
     private static Staff Person(string account, string name, params StaffRole[] roles) => new(account, name, roles.ToHashSet());
 
     private static AuthorizationRequest Pended(ReviewType review = ReviewType.PriorAuthorization) => AuthorizationRequest.Receive(

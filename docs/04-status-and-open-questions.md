@@ -9,7 +9,7 @@ On 2026-11-11 the code was audited against the CMS Prior Authorization API workf
 ## What exists
 
 - A learning prototype you can drive from one page.
-- A service with a database, the request rules, the provider endpoints, and 259 automated tests that pass on SQLite (and, set up for it, on SQL Server).
+- A service with a database, the request rules, the provider endpoints, and 263 automated tests that pass on SQLite (and, set up for it, on SQL Server).
 - A staff portal: plan staff sign in with Windows, get their roles (coordinator, licensed clinician, physician, admin) from Active Directory groups, and work the review queue, claim and assign requests, approve, approve with changes, deny with a coded reason, or ask for more information. Admins register provider systems there. Decisions are recorded against the signed-in account.
 - Sign-in for provider systems (SMART Backend Services, SMART v1 and v2 scope names), with each provider limited to its own requests.
 - A sample provider client.

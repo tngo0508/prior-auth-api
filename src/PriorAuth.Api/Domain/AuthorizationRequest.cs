@@ -219,6 +219,23 @@ public class AuthorizationRequest
         AssignedToName = null;
     }
 
+    // ---------- What someone may do now ----------
+    // Pages ask these to decide which actions to offer. The methods that act enforce the same rules and say why not.
+
+    /// <summary>Someone other than this person has claimed the request.</summary>
+    public bool IsHeldByAnother(Staff staff) => AssignedTo is not null && AssignedTo != staff.Account;
+
+    public bool MayBeClaimedBy(Staff staff) => IsOpen && staff.WorksQueue && AssignedTo is null;
+
+    public bool MayBeAssignedBy(Staff staff) => IsOpen && staff.Has(StaffRole.Coordinator);
+
+    public bool MayBeReleasedBy(Staff staff) => IsOpen && AssignedTo is not null && (AssignedTo == staff.Account || staff.Has(StaffRole.Coordinator));
+
+    /// <summary>May approve, approve with changes, or deny it.</summary>
+    public bool MayBeDecidedBy(Staff staff) => IsOpen && staff.MayDecide(ReviewType) && !IsHeldByAnother(staff);
+
+    public bool MayBeAskedForInformationBy(Staff staff) => IsOpen && staff.WorksQueue && !IsHeldByAnother(staff);
+
     private void Assign(Staff to, Staff by, DateTime nowUtc, string text)
     {
         AssignedTo = to.Account;
@@ -320,7 +337,7 @@ public class AuthorizationRequest
 
     private void EnsureNotHeldByAnother(Staff by)
     {
-        if (AssignedTo is not null && AssignedTo != by.Account)
+        if (IsHeldByAnother(by))
             throw new DomainRuleException($"{AssignedToName} is working on this request. Ask them or a coordinator to release it first.");
     }
 

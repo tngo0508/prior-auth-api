@@ -116,8 +116,8 @@ The code is organized by what each part is for:
 | [Fhir](../src/PriorAuth.Api/Fhir) | PAS endpoints, reading and writing FHIR JSON, translating between FHIR and the domain | Domain, Data, Auth |
 | [Crd](../src/PriorAuth.Api/Crd) | CDS Hooks discovery and the two order services | Domain, Auth, Dtr |
 | [Dtr](../src/PriorAuth.Api/Dtr) | Builds questionnaires from the service list and serves them | Domain, Auth |
-| [Review](../src/PriorAuth.Api/Review) | `ReviewDesk` (every staff action on a request), the queue as JSON, decisions and document download | Domain, Data |
-| [Pages](../src/PriorAuth.Api/Pages) | The staff portal: queue, request, provider systems, test-user sign-in | Review, Auth, Data |
+| [Review](../src/PriorAuth.Api/Review) | `ReviewDesk` (every staff action on a request), the queue as JSON, decisions and document download | Domain, Data, Auth (who is signed in, the staff policies) |
+| [Pages](../src/PriorAuth.Api/Pages) | The staff portal: queue, request, provider systems, no-access and test-user sign-in. Asks the domain which actions to offer; acts through `ReviewDesk`. | Domain, Review, Auth, Data |
 | [Auth](../src/PriorAuth.Api/Auth) | Registration of provider systems, the token endpoint, token checks; staff sign-in and roles | Data, Domain |
 | [Data](../src/PriorAuth.Api/Data) | Database mapping and migrations | Domain, Auth |
 | [wwwroot](../src/PriorAuth.Api/wwwroot) | The developer guide, as a static file | Nothing |

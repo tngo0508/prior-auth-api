@@ -37,9 +37,16 @@ public static class StaffSignIn
     public const string AdminPolicy = "StaffAdmin";
     /// <summary>Anyone with at least one staff role.</summary>
     public const string AnyRolePolicy = "StaffAnyRole";
+    /// <summary>Signed in as staff, with or without a role. Only the no-access page uses it.</summary>
+    public const string SignedInPolicy = "StaffSignedIn";
     public const string DevSignInPath = "/staff/dev-sign-in";
     private const string RolesIdentityType = "StaffRoles";
     private const string DisplayNameClaim = "staff_display_name";
+    /// <summary>
+    /// The portal's own claim for a staff role. Roles are never checked with IsInRole: under Windows sign-in that also
+    /// answers for any Windows group with the same name, so a group called "Admin" would grant the Admin role.
+    /// </summary>
+    public const string RoleClaim = "priorauth_staff_role";
 
     public static StaffSignInMode Mode(IConfiguration config, IHostEnvironment environment)
     {
@@ -82,11 +89,12 @@ public static class StaffSignIn
         services.AddTransient<IClaimsTransformation, WindowsGroupRoles>();
         services.AddAuthorizationBuilder()
             .AddPolicy(QueuePolicy, policy => policy.AddAuthenticationSchemes(Scheme).RequireAuthenticatedUser()
-                .RequireRole(nameof(StaffRole.Coordinator), nameof(StaffRole.LicensedClinician), nameof(StaffRole.Physician)))
+                .RequireClaim(RoleClaim, nameof(StaffRole.Coordinator), nameof(StaffRole.LicensedClinician), nameof(StaffRole.Physician)))
             .AddPolicy(AdminPolicy, policy => policy.AddAuthenticationSchemes(Scheme).RequireAuthenticatedUser()
-                .RequireRole(nameof(StaffRole.Admin)))
+                .RequireClaim(RoleClaim, nameof(StaffRole.Admin)))
             .AddPolicy(AnyRolePolicy, policy => policy.AddAuthenticationSchemes(Scheme).RequireAuthenticatedUser()
-                .RequireRole(Enum.GetNames<StaffRole>()));
+                .RequireClaim(RoleClaim, Enum.GetNames<StaffRole>()))
+            .AddPolicy(SignedInPolicy, policy => policy.AddAuthenticationSchemes(Scheme).RequireAuthenticatedUser());
         return services;
     }
 
@@ -105,7 +113,7 @@ public static class StaffSignIn
     {
         var account = user.Identity?.IsAuthenticated == true ? user.Identity.Name : null;
         if (string.IsNullOrEmpty(account)) return null;
-        var roles = user.FindAll(ClaimTypes.Role)
+        var roles = user.FindAll(RoleClaim)
             .Select(c => Enum.TryParse<StaffRole>(c.Value, out var role) ? role : (StaffRole?)null)
             .OfType<StaffRole>().ToHashSet();
         return new Staff(account, user.FindFirstValue(DisplayNameClaim) ?? account, roles);
@@ -129,8 +137,8 @@ public static class StaffSignIn
     /// <summary>The identity the portal reads: the account, its display name and its roles.</summary>
     public static ClaimsPrincipal Principal(string account, string displayName, IEnumerable<StaffRole> roles, string authenticationType) =>
         new(new ClaimsIdentity(
-            [new Claim(ClaimTypes.Name, account), new Claim(DisplayNameClaim, displayName), .. roles.Select(r => new Claim(ClaimTypes.Role, r.ToString()))],
-            authenticationType, ClaimTypes.Name, ClaimTypes.Role));
+            [new Claim(ClaimTypes.Name, account), new Claim(DisplayNameClaim, displayName), .. roles.Select(r => new Claim(RoleClaim, r.ToString()))],
+            authenticationType, ClaimTypes.Name, RoleClaim));
 
     /// <summary>Keeps the list of people who have used the portal, so coordinators can assign requests to them.</summary>
     public static async Task RememberAsync(PriorAuthDb db, Staff staff, DateTime nowUtc)
@@ -175,7 +183,8 @@ public static class StaffSignIn
     /// Adds the portal's roles to a Windows sign-in, from the AD groups in configuration, and remembers the person.
     /// Provider tokens and the Development stand-in already carry what they need and are left alone.
     /// </summary>
-    private sealed class WindowsGroupRoles(IConfiguration config, PriorAuthDb db, IMemoryCache cache, TimeProvider clock) : IClaimsTransformation
+    private sealed class WindowsGroupRoles(IConfiguration config, PriorAuthDb db, IMemoryCache cache, TimeProvider clock, ILogger<WindowsGroupRoles> logger)
+        : IClaimsTransformation
     {
         public async Task<ClaimsPrincipal> TransformAsync(ClaimsPrincipal principal)
         {
@@ -185,17 +194,41 @@ public static class StaffSignIn
 
             var account = identity.Name!;
             var roles = RolesFromGroups(principal.IsInRole, config);
+            var displayName = cache.GetOrCreate($"staff-name:{account}", entry =>
+            {
+                entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(10);
+                return DirectoryDisplayName(account) ?? account;
+            })!;
             principal.AddIdentity(new ClaimsIdentity(
-                [new Claim(DisplayNameClaim, account), .. roles.Select(r => new Claim(ClaimTypes.Role, r.ToString()))],
-                RolesIdentityType, ClaimTypes.Name, ClaimTypes.Role));
+                [new Claim(DisplayNameClaim, displayName), .. roles.Select(r => new Claim(RoleClaim, r.ToString()))],
+                RolesIdentityType, ClaimTypes.Name, RoleClaim));
 
             // Windows signs in on every request; remember the person at most every few minutes.
             if (roles.Count > 0 && cache.TryGetValue($"staff-seen:{account}", out _) is false)
             {
                 cache.Set($"staff-seen:{account}", true, TimeSpan.FromMinutes(10));
-                await RememberAsync(db, new Staff(account, account, roles), clock.GetUtcNow().UtcDateTime);
+                await RememberAsync(db, new Staff(account, displayName, roles), clock.GetUtcNow().UtcDateTime);
             }
             return principal;
+        }
+
+        /// <summary>The person's display name from Active Directory, for example "Jordan Doe". Null when it cannot be read.</summary>
+        private string? DirectoryDisplayName(string account)
+        {
+            if (!OperatingSystem.IsWindows()) return null;
+            try
+            {
+                using var domain = new System.DirectoryServices.AccountManagement.PrincipalContext(System.DirectoryServices.AccountManagement.ContextType.Domain);
+                using var user = System.DirectoryServices.AccountManagement.UserPrincipal.FindByIdentity(domain, account);
+                return string.IsNullOrWhiteSpace(user?.DisplayName) ? null : user.DisplayName.Trim();
+            }
+            catch (Exception e) when (e is System.DirectoryServices.AccountManagement.PrincipalException
+                or System.Runtime.InteropServices.COMException or InvalidOperationException)
+            {
+                // The account name still identifies them; the name only reads better in lists.
+                logger.LogWarning(e, "Could not read the display name of {Account} from Active Directory.", account);
+                return null;
+            }
         }
     }
 }

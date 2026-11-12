@@ -585,10 +585,14 @@ Registration (`CheckKeySet`) and every use (`Unusable`) apply the same rules:
 
 [Auth/StaffSignIn.cs](../src/PriorAuth.Api/Auth/StaffSignIn.cs). The `Staff` policy scheme forwards to one of two handlers, chosen once from `StaffSignIn:Mode`:
 
-- **Windows** (default outside Development): ASP.NET Core's Negotiate handler (Kerberos, or NTLM). `WindowsGroupRoles`, an `IClaimsTransformation`, reads the four `StaffSignIn:Groups:*` settings and adds a role claim for each group the account is in (`RolesFromGroups`). It also records the person in `StaffMembers`, at most every ten minutes.
+- **Windows** (default outside Development): ASP.NET Core's Negotiate handler (Kerberos, or NTLM). `WindowsGroupRoles`, an `IClaimsTransformation`, reads the four `StaffSignIn:Groups:*` settings and adds a role claim for each group the account is in (`RolesFromGroups`). It reads the person's display name from Active Directory (cached ten minutes; the account name if it cannot), and records the person in `StaffMembers`, at most every ten minutes.
+
+Roles are the portal's own claim, `StaffSignIn.RoleClaim`, and the policies check that claim. Never check a staff role with `IsInRole` or `RequireRole`: under Windows sign-in those also answer for any Windows group with the same name, so a group called `Admin` would grant the Admin role.
 - **Development**: a cookie, set by `POST /staff/dev-sign-in` for one of `StaffSignIn:TestUsers`. `Mode` throws if this is configured outside the Development environment.
 
-`User.CurrentStaff()` turns the signed-in principal into a `Staff`. Without a sign-in the portal redirects to the sign-in page (Development) or Windows challenges; `/internal` answers 401. Signed in without the role, the portal shows `/no-access` and `/internal` answers 403.
+`User.CurrentStaff()` turns the signed-in principal into a `Staff`. Without a sign-in the portal redirects to the sign-in page (Development) or Windows challenges; `/internal` answers 401. Signed in without the role, the portal shows `/no-access` (the Development cookie redirects there; under Windows, `UseStatusCodePages` turns a bare 403 on a portal GET into that redirect) and `/internal` answers 403. `/no-access` is open to all, so it reads the staff sign-in itself to say who the person is and which groups give access.
+
+Pages decide which actions to offer by asking the request: `MayBeClaimedBy`, `MayBeAssignedBy`, `MayBeReleasedBy`, `MayBeDecidedBy`, `MayBeAskedForInformationBy`. These sit next to the methods that act, which enforce the same rules; don't re-derive them in a page.
 
 `AuthSetup.StaffOnly(policy)` puts a route group behind a staff policy and refuses a change (anything but GET or HEAD) without `X-Requested-By: prior-auth-reviewer`, so a form on another site cannot post to it.
 

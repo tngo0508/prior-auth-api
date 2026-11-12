@@ -72,7 +72,7 @@ A request assigned to someone else cannot be decided until it is released or rea
 
 ### Portal pages
 
-- **Queue** (`/`): waiting for a decision (default), mine, decided, all. Columns: received, member, service, program, review type, status, assigned to. Oldest first.
+- **Queue** (`/`): waiting for a decision (default), mine, decided, all. Columns: received, member, service, program, review type, status, assigned to. Waiting and mine: oldest first, so nothing sits at the bottom. Decided and all: newest first, so the 100-row page never cuts off the latest decisions (changed during the build).
 - **Request** (`/requests/{id}`): details, documents (download), history, assignment controls, and only the decision forms the signed-in person may use.
 - **Provider systems** (`/providers`, admin): list, register (name, contact email, public key set), deactivate. The contact email is stored now and used for phase 3 emails.
 - Forms post with antiforgery tokens. Concurrency conflicts show "someone else changed this request; reload".

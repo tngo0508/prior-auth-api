@@ -40,16 +40,16 @@
     else if (!Model.HeldByAnother) { <p>You are working on this request.</p> }
     else { <p><strong>@r.AssignedToName</strong> is working on this request. Only they can act on it until it is released.</p> }
     <div class="row">
-      @if (r.AssignedTo is null && Model.Me.WorksQueue)
+      @if (r.MayBeClaimedBy(Model.Me))
       {
         <form method="post" asp-page-handler="Claim"><input type="hidden" asp-for="Version"><button type="submit">Claim it</button></form>
       }
-      @if (r.AssignedTo is not null && (!Model.HeldByAnother || Model.Me.Has(StaffRole.Coordinator)))
+      @if (r.MayBeReleasedBy(Model.Me))
       {
         <form method="post" asp-page-handler="Release"><input type="hidden" asp-for="Version"><button type="submit">Release to the queue</button></form>
       }
     </div>
-    @if (Model.Me.Has(StaffRole.Coordinator))
+    @if (r.MayBeAssignedBy(Model.Me))
     {
       <form method="post" asp-page-handler="Assign" class="row">
         <input type="hidden" asp-for="Version">
@@ -66,7 +66,7 @@
     }
   </div>
 
-  @if (Model.MayDecide)
+  @if (r.MayBeDecidedBy(Model.Me))
   {
     <h2>Decide</h2>
     <div class="card">
@@ -108,7 +108,7 @@
     <p class="muted">@(r.ReviewType == ReviewType.ConcurrentReview ? "Only a physician can decide a concurrent review." : "Only a licensed clinician or a physician can approve or deny.")</p>
   }
 
-  @if (Model.MayRequestInformation)
+  @if (r.MayBeAskedForInformationBy(Model.Me))
   {
     <h2>Ask the provider for more</h2>
     <form method="post" asp-page-handler="RequestInformation" class="row card">
@@ -120,11 +120,11 @@
 }
 
 <h2>Documents from the provider</h2>
-@if (r.Documents.Count == 0) { <p class="muted">None.</p> }
+@if (Model.Documents.Count == 0) { <p class="muted">None.</p> }
 else
 {
   <ul>
-  @foreach (var d in r.Documents.OrderBy(d => d.ReceivedAtUtc))
+  @foreach (var d in Model.Documents)
   {
     <li><a href="/internal/requests/@r.Id/documents/@d.Id">@d.Title</a> <span class="muted">@d.ContentType · @Math.Max(1, d.SizeBytes / 1024) KB · @Model.Local(d.ReceivedAtUtc)</span></li>
   }

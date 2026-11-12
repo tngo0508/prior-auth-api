@@ -15,6 +15,10 @@ public class DetailModel(PriorAuthDb db, PlanClock clock, ReviewDesk desk, Denia
     public Staff Me { get; private set; } = null!;
     public string Program { get; private set; } = "";
     public IReadOnlyList<Staff> Assignable { get; private set; } = [];
+
+    /// <summary>A document as the page lists it. The file itself is only read when someone downloads it.</summary>
+    public record DocumentRow(string Id, string Title, string ContentType, int SizeBytes, DateTime ReceivedAtUtc);
+    public IReadOnlyList<DocumentRow> Documents { get; private set; } = [];
     public IReadOnlyList<DenialReason> DenialReasons => reasons.All;
     public PlanClock Clock => clock;
     public DateOnly Today => clock.Today;
@@ -75,13 +79,18 @@ public class DetailModel(PriorAuthDb db, PlanClock clock, ReviewDesk desk, Denia
     {
         Me = User.CurrentStaff()!;
         var request = await db.AuthorizationRequests.AsNoTracking().AsSplitQuery()
-            .Include(r => r.Documents).Include(r => r.History)
+            .Include(r => r.History)
             .FirstOrDefaultAsync(r => r.Id == id);
         if (request is null) return false;
         AuthorizationRequest = request;
+        Documents = await db.SupportingDocuments.AsNoTracking()
+            .Where(d => EF.Property<string>(d, "AuthorizationRequestId") == id)
+            .OrderBy(d => d.ReceivedAtUtc)
+            .Select(d => new DocumentRow(d.Id, d.Title, d.ContentType, d.SizeBytes, d.ReceivedAtUtc))
+            .ToListAsync();
         Version = request.Version;
         Program = IndexModel.ProgramOf(catalog, request.ServiceSystem, request.ServiceCode);
-        if (Me.Has(StaffRole.Coordinator))
+        if (request.MayBeAssignedBy(Me))
             Assignable = (await db.StaffMembers.AsNoTracking().OrderBy(m => m.DisplayName).ToListAsync())
                 .Select(m => m.AsStaff()).Where(s => s.WorksQueue).ToList();
         return true;
@@ -89,7 +98,5 @@ public class DetailModel(PriorAuthDb db, PlanClock clock, ReviewDesk desk, Denia
 
     public string Local(DateTime utc) => clock.LocalTime(utc).ToString("d MMM yyyy, h:mm tt");
 
-    public bool HeldByAnother => AuthorizationRequest.AssignedTo is not null && AuthorizationRequest.AssignedTo != Me.Account;
-    public bool MayDecide => AuthorizationRequest.IsOpen && Me.MayDecide(AuthorizationRequest.ReviewType) && !HeldByAnother;
-    public bool MayRequestInformation => AuthorizationRequest.Status == AuthorizationStatus.Pended && Me.WorksQueue && !HeldByAnother;
+    public bool HeldByAnother => AuthorizationRequest.IsHeldByAnother(Me);
 }

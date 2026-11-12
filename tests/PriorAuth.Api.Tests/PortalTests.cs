@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using PriorAuth.Api.Auth;
 using PriorAuth.Api.Domain;
 using PriorAuth.Api.Review;
@@ -34,6 +35,21 @@ public class PortalTests(ApiFactory factory) : IClassFixture<ApiFactory>, IAsync
         var entry = await QueueEntry(id);
         Assert.Equal("Approved", entry.GetProperty("status").GetString());
         Assert.Equal(ApiFactory.ClinicianAccount, entry.GetProperty("decidedByAccount").GetString());
+    }
+
+    [Fact]
+    public async Task The_request_page_lists_the_providers_documents_as_downloads()
+    {
+        var document = $$"""
+            { "resource": { "resourceType": "DocumentReference", "status": "current",
+                "content": [{ "attachment": { "contentType": "text/plain", "title": "Assessment", "data": "{{Convert.ToBase64String(Encoding.UTF8.GetBytes("Synthetic assessment."))}}" } }] } }
+            """;
+        var id = await NewPendedRequest(document);
+
+        var page = await factory.SignedInAs(ApiFactory.ClinicianAccount).GetStringAsync($"/requests/{id}");
+
+        Assert.Matches($"<a href=\"/internal/requests/{id}/documents/[^\"]+\">Assessment</a>", page);
+        Assert.Contains("text/plain", page);
     }
 
     [Fact]
@@ -117,6 +133,31 @@ public class PortalTests(ApiFactory factory) : IClassFixture<ApiFactory>, IAsync
         Assert.Contains("Lee Clinician", await byPhysician.Content.ReadAsStringAsync());
     }
 
+    [Fact]
+    public async Task Someone_without_the_role_for_a_page_is_told_who_they_are_signed_in_as()
+    {
+        var page = await factory.SignedInAs(ApiFactory.AdminAccount).GetAsync("/requests/anything");
+
+        Assert.Equal("/no-access", page.RequestMessage!.RequestUri!.AbsolutePath);
+        Assert.Contains(@"You are signed in as <strong>DEV\ari.admin</strong>", await page.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task A_Windows_group_named_like_a_portal_role_does_not_grant_it()
+    {
+        // Windows answers IsInRole for any group of that name. The portal must only trust its own role claim.
+        var windowsUser = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+            [new(System.Security.Claims.ClaimTypes.Name, @"COUNTY\someone"), new(System.Security.Claims.ClaimTypes.Role, "Admin")],
+            "Negotiate", System.Security.Claims.ClaimTypes.Name, System.Security.Claims.ClaimTypes.Role));
+        var authorization = factory.Services.GetRequiredService<Microsoft.AspNetCore.Authorization.IAuthorizationService>();
+
+        var result = await authorization.AuthorizeAsync(windowsUser, resource: null, StaffSignIn.AdminPolicy);
+
+        Assert.True(windowsUser.IsInRole("Admin"));
+        Assert.False(result.Succeeded);
+        Assert.Empty(windowsUser.CurrentStaff()!.Roles);
+    }
+
     // ---------- Sign-in set-up, without a web server ----------
 
     [Fact]
@@ -150,10 +191,10 @@ public class PortalTests(ApiFactory factory) : IClassFixture<ApiFactory>, IAsync
 
     private static IConfiguration Config(Dictionary<string, string?> values) => new ConfigurationBuilder().AddInMemoryCollection(values).Build();
 
-    private async Task<string> NewPendedRequest()
+    private async Task<string> NewPendedRequest(params string[] extraEntries)
     {
         var response = await _provider.PostAsync("/fhir/Claim/$submit",
-            new StringContent(PasFixtures.RequestBundle($"REQ-{Guid.NewGuid():N}"), Encoding.UTF8, "application/fhir+json"));
+            new StringContent(PasFixtures.RequestBundle($"REQ-{Guid.NewGuid():N}", extraEntries: extraEntries), Encoding.UTF8, "application/fhir+json"));
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         return body.GetProperty("entry")[0].GetProperty("resource").GetProperty("id").GetString()!;
     }
