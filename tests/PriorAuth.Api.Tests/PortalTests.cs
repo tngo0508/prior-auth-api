@@ -115,15 +115,6 @@ public class PortalTests(ApiFactory factory) : IClassFixture<ApiFactory>, IAsync
     }
 
     [Fact]
-    public async Task With_the_test_sign_in_the_register_form_offers_a_test_key_made_in_the_browser()
-    {
-        var page = await factory.SignedInAs(ApiFactory.AdminAccount).GetStringAsync("/providers");
-
-        Assert.Contains("Generate a test key", page);
-        Assert.Contains("crypto.subtle.generateKey", page);
-    }
-
-    [Fact]
     public async Task A_provider_system_can_be_registered_with_a_contact_email_and_a_bad_one_is_refused()
     {
         var admin = factory.SignedInAs(ApiFactory.AdminAccount);

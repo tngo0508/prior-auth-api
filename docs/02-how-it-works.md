@@ -237,7 +237,7 @@ The portal is a set of Razor Pages served by the same app. Plan staff sign in wi
 
 - **The queue** (`/`) lists requests waiting for a decision or for the provider, oldest first, with who is working on each. Other tabs show the person's own requests, decided ones, and all.
 - **A request** (`/requests/{id}`) shows what was asked, the documents the provider sent as download links, and the history. Anyone who works the queue can claim it; a coordinator can assign it to someone or release it. A licensed clinician or physician can approve, approve with changes, or deny with a reason from the plan's list; only a physician decides a concurrent review. Anyone who works the queue can ask the provider for more information.
-- **Provider systems** (`/providers`) is for admins: register a provider's system with its public keys, or switch one off. In Development it can also make a test key in the browser ([Sign-in for provider systems](05-sign-in.md#a-test-key-in-development-only)).
+- **Provider systems** (`/providers`) is for admins: register a provider's system with its public keys, or switch one off.
 
 When a rule is broken, for example a coordinator trying to approve, the page shows why and nothing changes. If someone else changed the request after the page was loaded, the action is refused and the page shows the request as it is now.
 
