@@ -19,6 +19,13 @@ public static class ClientKeys
     /// <summary>JWK members that only a private or symmetric key has (RFC 7518 sections 6.2.2, 6.3.2 and 6.4.1).</summary>
     private static readonly string[] PrivateMembers = ["d", "p", "q", "dp", "dq", "qi", "oth", "k"];
 
+    /// <summary>Whether a key set holds something that must never be shared: private key parts, or a symmetric (shared secret) key.</summary>
+    public static bool HoldsSecret(JsonElement jwks) =>
+        jwks.ValueKind == JsonValueKind.Object && jwks.TryGetProperty("keys", out var keys) && keys.ValueKind == JsonValueKind.Array &&
+        keys.EnumerateArray().Any(key => key.ValueKind == JsonValueKind.Object &&
+            (PrivateMembers.Any(part => key.TryGetProperty(part, out _)) ||
+             (key.TryGetProperty("kty", out var kty) && kty.ValueKind == JsonValueKind.String && kty.GetString() == "oct")));
+
     /// <summary>Checks a JSON Web Key Set sent at registration. Returns why it is refused, or null if every key is acceptable.</summary>
     public static string? CheckKeySet(JsonElement jwks)
     {

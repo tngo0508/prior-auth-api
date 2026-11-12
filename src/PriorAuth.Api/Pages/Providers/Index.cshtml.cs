@@ -26,6 +26,12 @@ public class IndexModel(PriorAuthDb db, PlanClock clock, TimeProvider time) : Pa
     public async Task<IActionResult> OnPostRegisterAsync()
     {
         Problem = Check(out var keys);
+        if (Problem == PrivateKeyPasted)
+        {
+            // Do not show a private key on the page again.
+            ModelState.Remove(nameof(Jwks));
+            Jwks = "";
+        }
         if (Problem is not null)
         {
             await Load();
@@ -57,8 +63,10 @@ public class IndexModel(PriorAuthDb db, PlanClock clock, TimeProvider time) : Pa
         try
         {
             using var document = JsonDocument.Parse(Jwks ?? "");
+            // The person registering may not be technical: say what to do, and keep the exact reason for the provider's developer.
+            if (ClientKeys.HoldsSecret(document.RootElement)) return PrivateKeyPasted;
             var problem = ClientKeys.CheckKeySet(document.RootElement);
-            if (problem is not null) return problem;
+            if (problem is not null) return $"This key cannot be registered. Send the provider's developer this reason so they can fix it: {problem}";
             keys = document.RootElement.GetRawText();
             return null;
         }
@@ -67,6 +75,9 @@ public class IndexModel(PriorAuthDb db, PlanClock clock, TimeProvider time) : Pa
             return "The public keys are not JSON. Paste the provider's JSON Web Key Set, which starts with {\"keys\": [";
         }
     }
+
+    public const string PrivateKeyPasted = "This is a private key, or holds one. Do not register it, and do not pass it on. "
+        + "A private key must never leave the provider, so this one is no longer safe to use: ask the provider to make a new pair of keys and send only the public key.";
 
     private async Task Load() => Clients = await db.ProviderClients.AsNoTracking().OrderByDescending(c => c.Active).ThenBy(c => c.Name).ToListAsync();
 }

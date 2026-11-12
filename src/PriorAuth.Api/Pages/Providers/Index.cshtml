@@ -1,6 +1,21 @@
 @page "/providers"
 @model PriorAuth.Api.Pages.Providers.IndexModel
-@{ ViewData["Title"] = "Provider systems"; }
+@inject IConfiguration Config
+@{
+    ViewData["Title"] = "Provider systems";
+    var serviceAddress = PublicUrl.Base(HttpContext.Request, Config);
+    var keyRequest = $"""
+        Hello,
+
+        To connect your system to our prior authorization service, please send us your system's public key as a JSON Web Key Set (SMART Backend Services, signed with RS384 or ES384).
+
+        Please send only the public key, never the private key.
+
+        Once we have registered it, we will send you a client ID. The service is at {serviceAddress}, and the guide for your developers is at {serviceAddress}/developers.html.
+
+        Thank you.
+        """;
+}
 <h1>Provider systems</h1>
 <p class="lede">Each provider's software signs in with its own key. Register a system only after checking who the provider is.</p>
 
@@ -43,9 +58,29 @@ else
   <div class="field"><label for="name">Provider name</label><input id="name" type="text" asp-for="Name" required></div>
   <div class="field"><label for="email">Contact email <span class="muted">(optional)</span></label><input id="email" type="text" asp-for="ContactEmail" placeholder="Where to tell them a request needs attention"></div>
   <div class="field">
-    <label for="jwks">Public keys (JSON Web Key Set)</label>
-    <span class="muted">Paste the key set the provider's developer sent you. It starts with {"keys": [ and never holds a private key.</span>
+    <label for="jwks">Public key from the provider <span class="muted">(JSON Web Key Set)</span></label>
+    <span class="muted">Paste everything the provider sent, from the first { to the last }. It starts with {"keys": [</span>
     <textarea id="jwks" asp-for="Jwks" required placeholder='{"keys": [ ... ]}'></textarea>
   </div>
+  <details class="help">
+    <summary>How do I get the public key?</summary>
+    <p>You do not make it. The provider's software company or IT team makes a pair of keys in their own system: a <strong>private key</strong> they keep secret, and a <strong>public key</strong> they can share. Their system uses the private key to prove who it is; the plan keeps only the public key to check that proof.</p>
+    <ol>
+      <li><strong>Ask the provider for it.</strong> Send this message to their technical contact or software company:
+        <textarea id="key-request" class="message" readonly rows="9" aria-label="Message asking the provider for their public key">@keyRequest</textarea>
+        <button class="btn" type="button" id="copy-key-request">Copy the message</button> <span class="muted" id="copy-done" role="status"></span>
+      </li>
+      <li><strong>Check who sent it.</strong> Before registering, confirm the key really came from that provider, for example by calling a contact you already know there. Anyone whose key is registered can send requests in that provider's name.</li>
+      <li><strong>Paste it above and register.</strong> If the page says "This is a private key", do not register it: the provider sent the half they should have kept, and must make a new pair and send only the public key. If it gives another reason, send that reason to the provider's developer.</li>
+      <li><strong>Send the provider the client ID</strong> this page shows after registering. It is not a secret. Their system needs it, together with the service address <code>@serviceAddress</code>, to sign in.</li>
+    </ol>
+  </details>
+  <script>
+    document.getElementById("copy-key-request").addEventListener("click", async () => {
+      const text = document.getElementById("key-request"), done = document.getElementById("copy-done");
+      try { await navigator.clipboard.writeText(text.value); done.textContent = "Copied."; }
+      catch { text.select(); done.textContent = "Select the text and copy it."; }
+    });
+  </script>
   <button class="btn primary spaced-sm" type="submit">Register</button>
 </form>

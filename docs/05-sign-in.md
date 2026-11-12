@@ -104,7 +104,7 @@ The answer (201) contains the `clientId` to give to the provider. Every key in t
 
 The same rules are checked again each time a key is used, so a key registered before the rules existed cannot be used either.
 
-Admins can do the same in the staff portal: **Provider systems** (`/providers`) has a form for the name, a contact email and the key set, and a **Switch off** button on each row. Ask the provider's developer for their key set, and check who sent it before registering: whoever holds the matching private key can send requests under that provider's name.
+Admins can do the same in the staff portal: **Provider systems** (`/providers`) has a form for the name, a contact email and the key set, and a **Switch off** button on each row. Ask the provider's developer for their key set, and check who sent it before registering: whoever holds the matching private key can send requests under that provider's name. The form explains this in plain words for staff who are not technical, with a message to copy and send to the provider asking for their public key. If someone pastes a private key, the page refuses it, does not show it again, and says the provider must make a new pair.
 
 `POST /internal/clients/{clientId}/deactivate` switches a client off. It can no longer get tokens, and a token it already holds is refused at once on every call, not only when it expires.
 
