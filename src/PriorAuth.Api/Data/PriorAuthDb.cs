@@ -26,6 +26,44 @@ public class PriorAuthDb(DbContextOptions<PriorAuthDb> options) : DbContext(opti
             options.UseSqlite(connectionString);
     }
 
+    /// <summary>
+    /// The tables and columns the model needs that a SQLite file lacks, as "Table" or "Table.Column".
+    /// A local file is created once and never upgraded, so one made by an older build is missing what was added since.
+    /// </summary>
+    public IReadOnlyList<string> MissingFromSqliteFile()
+    {
+        var connection = Database.GetDbConnection();
+        var opened = connection.State != System.Data.ConnectionState.Open;
+        if (opened) connection.Open();
+        try
+        {
+            var missing = new List<string>();
+            foreach (var table in Model.GetEntityTypes().Select(e => e.GetTableName()).OfType<string>().Distinct())
+            {
+                using var command = connection.CreateCommand();
+                command.CommandText = "SELECT name FROM pragma_table_info($table)";
+                var parameter = command.CreateParameter();
+                parameter.ParameterName = "$table";
+                parameter.Value = table;
+                command.Parameters.Add(parameter);
+                var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                using (var reader = command.ExecuteReader())
+                    while (reader.Read()) columns.Add(reader.GetString(0));
+                if (columns.Count == 0) { missing.Add(table); continue; }
+
+                var tableId = Microsoft.EntityFrameworkCore.Metadata.StoreObjectIdentifier.Table(table);
+                missing.AddRange(Model.GetEntityTypes().Where(e => e.GetTableName() == table)
+                    .SelectMany(e => e.GetProperties()).Select(p => p.GetColumnName(tableId)).OfType<string>()
+                    .Distinct().Where(c => !columns.Contains(c)).Select(c => $"{table}.{c}"));
+            }
+            return missing;
+        }
+        finally
+        {
+            if (opened) connection.Close();
+        }
+    }
+
     /// <summary>Longest sign-in account kept (DOMAIN\\user or user@domain).</summary>
     public const int MaxAccountLength = 256;
 
