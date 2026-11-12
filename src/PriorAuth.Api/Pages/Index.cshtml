@@ -1,0 +1,39 @@
+@page
+@model IndexModel
+@{
+    ViewData["Title"] = "Review queue";
+    var tabs = new[] { ("waiting", "Waiting"), ("mine", "Mine"), ("decided", "Decided"), ("all", "All") };
+}
+<h1>Review queue</h1>
+<p class="muted">@Model.WaitingCount waiting for a decision or for the provider. Times are the plan's local time.</p>
+<nav class="tabs" aria-label="Which requests">
+  @foreach (var (key, label) in tabs)
+  {
+    <a href="/?show=@key" aria-current="@(Model.Show == key ? "page" : null)">@label</a>
+  }
+</nav>
+@if (Model.Rows.Count == 0)
+{
+  <p>@(Model.Show switch { "mine" => "You have not claimed any requests. Open one from Waiting and claim it.", "decided" => "Nothing has been decided yet.", _ => "Nothing is waiting. New requests appear here as providers send them." })</p>
+}
+else
+{
+  <table>
+    <thead><tr><th>Received</th><th>Member</th><th>Service</th><th class="hide-narrow">Program</th><th class="hide-narrow">Review</th><th>Status</th><th>Working on it</th></tr></thead>
+    <tbody>
+    @foreach (var row in Model.Rows)
+    {
+      <tr>
+        <td>@row.ReceivedLocal.ToString("d MMM, h:mm tt")</td>
+        <td><a href="/requests/@row.Id">@row.MemberName</a></td>
+        <td>@row.ServiceName <span class="muted">@row.ServiceCode</span></td>
+        <td class="hide-narrow">@row.Program</td>
+        <td class="hide-narrow">@IndexModel.Describe(row.ReviewType)</td>
+        <td class="status @row.Status">@IndexModel.Describe(row.Status)</td>
+        <td>@(row.Mine ? "You" : row.AssignedToName ?? "")</td>
+      </tr>
+    }
+    </tbody>
+  </table>
+  @if (Model.Rows.Count == IndexModel.PageSize) { <p class="muted">Showing the first @IndexModel.PageSize.</p> }
+}

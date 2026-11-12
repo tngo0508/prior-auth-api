@@ -11,8 +11,8 @@ GET {{host}}/fhir/.well-known/smart-configuration
 ### Which services need authorization, and their paperwork
 GET {{host}}/requirements
 
-### The reviewer queue as JSON (same machine only)
+### The reviewer queue as JSON (answers 401 here: it needs a staff sign-in, so use the portal)
 GET {{host}}/internal/requests
 
-### Registered provider systems (same machine only)
+### Registered provider systems (answers 401 here: it needs an admin sign-in)
 GET {{host}}/internal/clients

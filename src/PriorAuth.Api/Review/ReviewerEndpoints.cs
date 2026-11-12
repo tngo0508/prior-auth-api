@@ -5,15 +5,18 @@ using PriorAuth.Api.Domain;
 
 namespace PriorAuth.Api.Review;
 
-public record ApproveBody(DateOnly Through, string Reviewer);
-public record DenyBody(string Reason, string Reviewer);
-public record RequestInformationBody(string Missing, string Reviewer);
+public record ApproveBody(DateOnly Through);
+public record ApproveWithChangesBody(DateOnly Through, string Change);
+public record DenyBody(string ReasonCode, string Reason);
+public record RequestInformationBody(string Missing);
+public record AssignBody(string Account);
 public record DocumentSummary(string Id, string Title, string ContentType, int SizeBytes, DateTime ReceivedAtUtc);
 public record HistorySummary(DateTime AtUtc, string Actor, string Text);
 
 /// <summary>
-/// The endpoints the agency's reviewer screen calls. These are internal and are not part of the FHIR API.
-/// NOTE: there is no staff sign-in yet, so the reviewer's name is taken from the request body.
+/// The review queue as JSON, for tools and tests. The portal pages do the same through <see cref="ReviewDesk"/>.
+/// Internal, not part of the FHIR API. Every call needs a signed-in coordinator, licensed clinician or physician;
+/// who did what is taken from the sign-in.
 /// </summary>
 public static class ReviewerEndpoints
 {
@@ -21,7 +24,7 @@ public static class ReviewerEndpoints
 
     public static void MapReviewerEndpoints(this WebApplication app)
     {
-        var group = app.MapGroup("/internal/requests").LocalCallersOnly();
+        var group = app.MapGroup("/internal/requests").StaffOnly(StaffSignIn.QueuePolicy);
 
         // The queue. status is open (default), decided or all. Never loads document contents or stored Bundles.
         group.MapGet("", async (string? status, int? skip, int? take, PriorAuthDb db) =>
@@ -38,7 +41,8 @@ public static class ReviewerEndpoints
                 .Select(r => new
                 {
                     r.Id, r.ProviderRequestId, r.ProviderName, r.MemberName, r.MemberIdentifier, r.ServiceCode, r.ServiceName,
-                    r.Status, r.AuthorizationNumber, r.AuthorizedThrough, r.Reason, r.ReceivedAtUtc, r.DecidedAtUtc, r.DecidedBy, r.Version,
+                    r.ReviewType, r.Status, r.AuthorizationNumber, r.AuthorizedThrough, r.Reason, r.ReceivedAtUtc, r.DecidedAtUtc, r.DecidedBy, r.Version,
+                    r.DecidedByAccount, r.Modification, r.DenialReasonCode, r.AssignedTo, r.AssignedToName,
                 })
                 .ToListAsync();
 
@@ -58,9 +62,11 @@ public static class ReviewerEndpoints
             return Results.Json(page.Select(r => new
             {
                 r.Id, r.ProviderRequestId, r.ProviderName, r.MemberName, r.MemberIdentifier, r.ServiceCode, r.ServiceName,
+                ReviewType = r.ReviewType?.ToString(),
                 Status = r.Status.ToString(),
                 IsOpen = r.Status is AuthorizationStatus.Pended or AuthorizationStatus.InformationRequested,
                 r.AuthorizationNumber, r.AuthorizedThrough, r.Reason, r.ReceivedAtUtc, r.DecidedAtUtc, r.DecidedBy, r.Version,
+                r.DecidedByAccount, r.Modification, r.DenialReasonCode, r.AssignedTo, r.AssignedToName,
                 Documents = documents[r.Id].OrderBy(d => d.ReceivedAtUtc),
                 History = history[r.Id],
             }));
@@ -77,41 +83,37 @@ public static class ReviewerEndpoints
             return Results.File(document.Data, document.ContentType, fileDownloadName: SafeFileName(document.Title));
         });
 
-        group.MapPost("{id}/approve", (string id, ApproveBody body, PriorAuthDb db, PlanClock clock) =>
-            Decide(id, db, r => r.Approve(body.Through, NewAuthorizationNumber(clock), body.Reviewer, clock.UtcNow, clock.Today)));
-
-        group.MapPost("{id}/deny", (string id, DenyBody body, PriorAuthDb db, PlanClock clock) =>
-            Decide(id, db, r => r.Deny(body.Reason, body.Reviewer, clock.UtcNow)));
-
-        group.MapPost("{id}/request-information", (string id, RequestInformationBody body, PriorAuthDb db, PlanClock clock) =>
-            Decide(id, db, r => r.RequestInformation(body.Missing, body.Reviewer, clock.UtcNow)));
+        group.MapPost("{id}/claim", (string id, HttpContext http, ReviewDesk desk) => Answer(desk.Claim(id, Me(http))));
+        group.MapPost("{id}/release", (string id, HttpContext http, ReviewDesk desk) => Answer(desk.Release(id, Me(http))));
+        group.MapPost("{id}/assign", (string id, AssignBody body, HttpContext http, ReviewDesk desk) => Answer(desk.Assign(id, body.Account, Me(http))));
+        group.MapPost("{id}/approve", (string id, ApproveBody body, HttpContext http, ReviewDesk desk) => Answer(desk.Approve(id, body.Through, Me(http))));
+        group.MapPost("{id}/approve-with-changes", (string id, ApproveWithChangesBody body, HttpContext http, ReviewDesk desk) =>
+            Answer(desk.ApproveWithChanges(id, body.Through, body.Change, Me(http))));
+        group.MapPost("{id}/deny", (string id, DenyBody body, HttpContext http, ReviewDesk desk) => Answer(desk.Deny(id, body.ReasonCode, body.Reason, Me(http))));
+        group.MapPost("{id}/request-information", (string id, RequestInformationBody body, HttpContext http, ReviewDesk desk) =>
+            Answer(desk.RequestInformation(id, body.Missing, Me(http))));
     }
 
-    private static async Task<IResult> Decide(string id, PriorAuthDb db, Action<AuthorizationRequest> action)
+    // The policy has already required a signed-in staff member.
+    private static Staff Me(HttpContext http) => http.User.CurrentStaff()!;
+
+    private static async Task<IResult> Answer(Task<DeskResult> action)
     {
-        var request = await db.AuthorizationRequests.FirstOrDefaultAsync(r => r.Id == id);
-        if (request is null) return Results.NotFound();
-        try
+        var result = await action;
+        var request = result.Request;
+        return result.Outcome switch
         {
-            action(request);
-            await db.SaveChangesAsync();
-        }
-        catch (DomainRuleException ex)
-        {
-            return Results.Problem(ex.Message, statusCode: StatusCodes.Status422UnprocessableEntity);
-        }
-        catch (DbUpdateConcurrencyException)
-        {
-            // Someone else changed the request after it was loaded: another reviewer, or the provider answering an information request.
-            return Results.Problem("This request was changed by someone else a moment ago. Reload it and check before deciding.",
-                statusCode: StatusCodes.Status409Conflict);
-        }
-        return Results.Json(new { request.Id, Status = request.Status.ToString(), request.AuthorizationNumber, request.AuthorizedThrough, request.Reason, request.DecidedBy, request.Version });
+            DeskOutcome.NotFound => Results.NotFound(),
+            DeskOutcome.Refused => Results.Problem(result.Message, statusCode: StatusCodes.Status422UnprocessableEntity),
+            DeskOutcome.Conflict => Results.Problem(result.Message, statusCode: StatusCodes.Status409Conflict),
+            _ => Results.Json(new
+            {
+                request!.Id, Status = request.Status.ToString(), request.AuthorizationNumber, request.AuthorizedThrough, request.Reason,
+                request.Modification, request.DenialReasonCode, request.DecidedBy, request.DecidedByAccount,
+                request.AssignedTo, request.AssignedToName, request.Version,
+            }),
+        };
     }
-
-    /// <summary>Numbers carry the plan's local date of the decision.</summary>
-    private static string NewAuthorizationNumber(PlanClock clock) =>
-        $"PA-{clock.Today:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()}";
 
     private static string SafeFileName(string title)
     {

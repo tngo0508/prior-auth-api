@@ -6,23 +6,16 @@ namespace PriorAuth.Api.Tests;
 /// <summary>Rules that hold without a web server: the service list's own checks, matching, and the plan's calendar.</summary>
 public class DomainRuleTests
 {
-    private static ServiceRequirement Service(string code, string system = CodeSystems.Hcpcs, params RequirementQuestion[] questions) =>
-        new() { Code = code, System = system, Name = "Service " + code, Questions = questions };
-
-    [Fact]
-    public void A_service_list_with_the_same_code_twice_stops_start_up()
-    {
-        var error = Assert.Throws<InvalidOperationException>(() => new ServiceRequirementCatalog([Service("H2019"), Service("h2019")]));
-
-        Assert.Contains("listed more than once", error.Message);
-    }
+    private static ServiceRequirementCatalog WithQuestion(RequirementQuestion question) => new(
+        [new ServiceRequirement { Code = "H2019", Name = "TBS", Rule = ReviewRule.PriorAuthorization, Questionnaire = "dtr-q" }],
+        [new QuestionnaireDefinition { Id = "dtr-q", Title = "Q", Questions = [question] }]);
 
     [Fact]
     public void Choice_options_whose_codes_would_collide_stop_start_up()
     {
         var question = new RequirementQuestion { LinkId = "q", Text = "Q", Type = "choice", Options = ["<5", ">5"] };
 
-        var error = Assert.Throws<InvalidOperationException>(() => new ServiceRequirementCatalog([Service("H2019", questions: question)]));
+        var error = Assert.Throws<InvalidOperationException>(() => WithQuestion(question));
 
         Assert.Contains("share the code", error.Message);
     }
@@ -32,28 +25,7 @@ public class DomainRuleTests
     {
         var question = new RequirementQuestion { LinkId = "q", Text = "Q", Type = "number" };
 
-        Assert.Throws<InvalidOperationException>(() => new ServiceRequirementCatalog([Service("H2019", questions: question)]));
-    }
-
-    [Fact]
-    public void A_code_only_matches_in_its_own_code_system()
-    {
-        var catalog = new ServiceRequirementCatalog([Service("H2019")]);
-
-        Assert.NotNull(catalog.Find(CodeSystems.Hcpcs, "H2019"));
-        Assert.Null(catalog.Find("http://example.org/local-codes", "H2019"));
-        Assert.Null(catalog.Find(null, "H2019"));
-    }
-
-    [Fact]
-    public void The_first_listed_coding_decides_the_service_wherever_it_sits()
-    {
-        var catalog = new ServiceRequirementCatalog([Service("H2019")]);
-
-        var (requirement, coding) = catalog.Match([new(CodeSystems.Cpt, "90834"), new(CodeSystems.Hcpcs, "H2019")]);
-
-        Assert.Equal("H2019", requirement?.Code);
-        Assert.Equal("H2019", coding?.Code);
+        Assert.Throws<InvalidOperationException>(() => WithQuestion(question));
     }
 
     [Fact]
@@ -70,7 +42,7 @@ public class DomainRuleTests
     {
         var request = Pended();
 
-        request.Approve(new DateOnly(2026, 11, 11), "PA-1", "Reviewer", new DateTime(2026, 11, 12, 1, 30, 0, DateTimeKind.Utc), today: new DateOnly(2026, 11, 11));
+        request.Approve(new DateOnly(2026, 11, 11), "PA-1", Reviewer, new DateTime(2026, 11, 12, 1, 30, 0, DateTimeKind.Utc), today: new DateOnly(2026, 11, 11));
 
         Assert.Equal(AuthorizationStatus.Approved, request.Status);
     }
@@ -80,7 +52,7 @@ public class DomainRuleTests
     {
         var clock = new PlanClock(new FixedTime(new DateTimeOffset(2026, 11, 12, 1, 30, 0, TimeSpan.Zero)), new ConfigurationBuilder().Build());
         var request = Pended();
-        request.Approve(new DateOnly(2026, 11, 30), "PA-1", "Reviewer", clock.UtcNow, clock.Today);
+        request.Approve(new DateOnly(2026, 11, 30), "PA-1", Reviewer, clock.UtcNow, clock.Today);
         var claim = new Hl7.Fhir.Model.Claim { Item = [new() { Sequence = 1 }] };
 
         var response = PriorAuth.Api.Fhir.PasMapper.ToClaimResponse(request, claim, "https://plan.example", clock);
@@ -94,7 +66,7 @@ public class DomainRuleTests
     {
         var request = Pended();
 
-        request.Deny("Not medically necessary", "Reviewer", DateTime.UtcNow);
+        request.Deny("not-medically-necessary", "Not medically necessary", Reviewer, DateTime.UtcNow);
 
         Assert.Null(request.AuthorizationNumber);
         Assert.Null(request.AuthorizedThrough);
@@ -106,14 +78,32 @@ public class DomainRuleTests
         var request = Pended();
         var before = request.Version;
 
-        request.RequestInformation("Client plan", "Reviewer", DateTime.UtcNow);
+        request.RequestInformation("Client plan", Reviewer, DateTime.UtcNow);
 
         Assert.True(request.Version > before);
     }
 
+    [Fact]
+    public void An_approval_with_changes_is_answered_as_modified_with_the_change()
+    {
+        var clock = new PlanClock(new FixedTime(new DateTimeOffset(2026, 11, 12, 18, 0, 0, TimeSpan.Zero)), new ConfigurationBuilder().Build());
+        var request = Pended();
+        request.ApproveWithChanges(new DateOnly(2027, 2, 4), "6 hours a week, not 10", "PA-1", Reviewer, clock.UtcNow, clock.Today);
+        var claim = new Hl7.Fhir.Model.Claim { Item = [new() { Sequence = 1 }] };
+
+        var response = PriorAuth.Api.Fhir.PasMapper.ToClaimResponse(request, claim, "https://plan.example", clock);
+
+        var action = response.Item[0].Adjudication[0].Extension.Single(e => e.Url == PriorAuth.Api.Fhir.PasMapper.ReviewActionUrl);
+        var code = Assert.IsType<Hl7.Fhir.Model.CodeableConcept>(action.Extension.Single(e => e.Url == PriorAuth.Api.Fhir.PasMapper.ReviewActionCodeUrl).Value);
+        Assert.Equal("A6", code.Coding[0].Code);
+        Assert.Equal("Approved with changes through 2027-02-04: 6 hours a week, not 10", response.Disposition);
+    }
+
+    private static readonly Staff Reviewer = new(@"DEV\lee", "Lee Clinician", new HashSet<StaffRole> { StaffRole.LicensedClinician });
+
     private static AuthorizationRequest Pended() => AuthorizationRequest.Receive(
         new RequestDetails("client", "", "REQ-1", "Clinic", "Alex Testpatient", "sys|1", CodeSystems.Hcpcs, "H2019", "TBS"),
-        authorizationRequired: true, "{}", [], DateTime.UtcNow);
+        ReviewType.PriorAuthorization, note: null, "{}", [], DateTime.UtcNow);
 
     private sealed class FixedTime(DateTimeOffset now) : TimeProvider
     {

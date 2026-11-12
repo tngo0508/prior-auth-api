@@ -114,11 +114,11 @@ With the service running:
 dotnet run --project samples/PriorAuth.SampleClient -- http://localhost:5020
 ```
 
-[The sample client](../samples/PriorAuth.SampleClient/Program.cs) creates a key pair, registers, signs in, checks the requirements, submits a request, waits for you to decide it in the reviewer queue, and asks for the status. It is about 120 lines and is the reference for a provider's developer.
+[The sample client](../samples/PriorAuth.SampleClient/Program.cs) creates a key pair, registers, signs in, checks the requirements, submits a request, waits for you to decide it in the staff portal, and asks for the status. It is about 120 lines and is the reference for a provider's developer.
 
 ## Limits to know about
 
-- **Agency staff do not sign in yet.** Until they do, everything under `/internal` (the reviewer queue and client registration) only answers callers on the server's own machine that were not forwarded by a proxy, and changes need the reviewer page's `X-Requested-By: prior-auth-reviewer` header. This is a stopgap, tracked in [issue #18](https://github.com/tngo0508/prior-auth-api/issues/18). The full rule is in [Running and testing](03-running-and-testing.md#for-agency-staff).
+- **Plan staff sign in separately.** This page is about provider systems. Plan staff sign in to the portal with Windows Integrated Authentication, and get their roles from Active Directory groups; in Development they pick a test user instead. Registering a provider system needs the admin role. The rules are in [Running and testing](03-running-and-testing.md#for-plan-staff).
 - **One server instance only.** The key that signs access tokens is created at start-up, so a restart signs every provider out, and the "already used" memory for assertions lives in that one process. Before running more than one instance, move the key to a secret store and the memory to shared storage ([issue #14](https://github.com/tngo0508/prior-auth-api/issues/14)).
 - **No key rotation by URL.** Keys are registered as a fixed set; a JWKS URL is not accepted ([issue #31](https://github.com/tngo0508/prior-auth-api/issues/31)).
 - **The public address must be configured.** Outside Development the server will not start without `Auth:PublicBaseUrl` set to an absolute https URL. Token audiences and the addresses in the discovery document come from it, never from the caller's `Host` header.

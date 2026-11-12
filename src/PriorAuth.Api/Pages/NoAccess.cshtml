@@ -1,0 +1,44 @@
+@page "/no-access"
+@model PriorAuth.Api.Pages.NoAccessModel
+@{ ViewData["Title"] = "No access"; var me = Model.Me; }
+<h1>You do not have access to this page</h1>
+@if (me is null)
+{
+  <p>The portal could not tell who you are signed in as.</p>
+}
+else if (me.Roles.Count == 0)
+{
+  <p>You are signed in as <strong>@me.Account</strong>, but your account is not in any of the portal's groups.</p>
+}
+else
+{
+  <p>You are signed in as <strong>@me.Account</strong>. Your account can do other things in the portal (@string.Join(", ", me.Roles.Order().Select(r => r.Describe()))), but not this.</p>
+}
+@if (Model.TestUsers)
+{
+  <p>This is the Development sign-in: each test user has fixed roles. <a href="/staff/dev-sign-in">Pick another test user.</a></p>
+}
+else
+{
+  <p>Access comes from these Active Directory groups:</p>
+  <table>
+    <thead><tr><th>Role</th><th>What it allows</th><th>Group</th></tr></thead>
+    <tbody>
+    @foreach (var (role, group) in Model.Groups)
+    {
+      <tr>
+        <td>@role.Describe()</td>
+        <td>@(role switch
+        {
+            StaffRole.Coordinator => "Works the queue, assigns requests, asks providers for missing information.",
+            StaffRole.LicensedClinician => "Decides prior authorization requests.",
+            StaffRole.Physician => "Decides any request, and is the only role that decides concurrent reviews.",
+            _ => "Registers and switches off provider systems.",
+        })</td>
+        <td>@(group ?? "Not set up yet")</td>
+      </tr>
+    }
+    </tbody>
+  </table>
+  <p>Ask your supervisor to have IT add you to the right group, then sign out of Windows and back in.</p>
+}

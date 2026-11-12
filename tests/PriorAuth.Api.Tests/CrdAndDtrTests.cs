@@ -16,7 +16,7 @@ public class CrdAndDtrTests(ApiFactory factory) : IClassFixture<ApiFactory>, IAs
     private const string QrContext = "http://hl7.org/fhir/us/davinci-dtr/StructureDefinition/qr-context";
     private const string IntendedUse = "http://hl7.org/fhir/us/davinci-dtr/StructureDefinition/intendedUse";
     private const string Package = "/fhir/Questionnaire/$questionnaire-package";
-    private const string H2019Canonical = "http://localhost/fhir/Questionnaire/prior-auth-h2019";
+    private const string H2019Canonical = "http://localhost/fhir/Questionnaire/dtr-mhp-youth";
 
     private TestProvider _provider = null!;
     private HttpClient _signedIn = null!;
@@ -68,11 +68,11 @@ public class CrdAndDtrTests(ApiFactory factory) : IClassFixture<ApiFactory>, IAs
 
         Assert.Equal("update", action.GetProperty("type").GetString());
         Assert.Equal("ServiceRequest", action.GetProperty("resource").GetProperty("resourceType").GetString());
-        Assert.Equal("covered", Value(information, "covered", "valueCode"));
+        Assert.Equal("conditional", Value(information, "covered", "valueCode"));
         Assert.Equal("auth-needed", Value(information, "pa-needed", "valueCode"));
         Assert.Equal("clinical", Value(information, "doc-needed", "valueCode"));
         Assert.Equal("withpa", Value(information, "doc-purpose", "valueCode"));
-        Assert.EndsWith("/fhir/Questionnaire/prior-auth-h2019", Value(information, "questionnaire", "valueCanonical"));
+        Assert.EndsWith("/fhir/Questionnaire/dtr-mhp-youth", Value(information, "questionnaire", "valueCanonical"));
         Assert.Equal("Coverage/cov-1", Sub(information, "coverage").GetProperty("valueReference").GetProperty("reference").GetString());
         Assert.False(string.IsNullOrEmpty(Value(information, "date", "valueDate")));
         Assert.False(string.IsNullOrEmpty(Value(information, "coverage-assertion-id", "valueString")));
@@ -88,6 +88,58 @@ public class CrdAndDtrTests(ApiFactory factory) : IClassFixture<ApiFactory>, IAs
         Assert.Equal("conditional", Value(information, "covered", "valueCode"));
         Assert.False(HasSub(information, "questionnaire"));
         Assert.False(HasSub(information, "doc-purpose"));
+    }
+
+    [Fact]
+    public async Task An_inpatient_admission_needs_no_prior_authorization_and_is_told_to_send_it_for_concurrent_review()
+    {
+        var information = await AnswerFor(Order("0100", "Coverage/cov-1", system: RevenueCodes));
+
+        Assert.Equal("no-auth", Value(information, "pa-needed", "valueCode"));
+        Assert.False(HasSub(information, "questionnaire"));
+        var reason = Sub(information, "reason").GetProperty("valueCodeableConcept").GetProperty("text").GetString();
+        Assert.Contains("reviewed concurrently", reason);
+        Assert.Contains("24 hours", reason);
+        Assert.Contains("/fhir/Questionnaire/dtr-mhp-inpatient", reason);
+    }
+
+    [Fact]
+    public async Task A_listed_service_the_plan_may_not_prior_authorize_says_so()
+    {
+        var information = await AnswerFor(Order("H0018", "Coverage/cov-1"));
+
+        Assert.Equal("no-auth", Value(information, "pa-needed", "valueCode"));
+        Assert.Contains("may not require prior authorization", Sub(information, "reason").GetProperty("valueCodeableConcept").GetProperty("text").GetString());
+    }
+
+    [Fact]
+    public async Task A_code_whose_entries_differ_only_by_modifier_and_rule_is_answered_conditional()
+    {
+        // H0019 is adult residential (no prior authorization) or, with U1, U2 or U3, a DMC-ODS residential level (prior authorization).
+        var information = await AnswerFor(Order("H0019", "Coverage/cov-1"));
+
+        Assert.Equal("conditional", Value(information, "pa-needed", "valueCode"));
+        Assert.False(HasSub(information, "questionnaire"));
+        Assert.Contains("H0019:U1", Sub(information, "reason").GetProperty("valueCodeableConcept").GetProperty("text").GetString());
+    }
+
+    [Fact]
+    public async Task A_code_whose_entries_share_a_rule_and_questionnaire_is_answered_without_modifiers()
+    {
+        // H2012 is day rehabilitation or, with TG, day treatment intensive. Both need authorization with the same questionnaire.
+        var information = await AnswerFor(Order("H2012", "Coverage/cov-1"));
+
+        Assert.Equal("auth-needed", Value(information, "pa-needed", "valueCode"));
+        Assert.EndsWith("/fhir/Questionnaire/dtr-mhp-day-treatment", Value(information, "questionnaire", "valueCanonical"));
+    }
+
+    [Fact]
+    public async Task A_code_in_an_unknown_code_system_is_answered_conditional_not_no_auth()
+    {
+        var information = await AnswerFor(Order("H2019", "Coverage/cov-1", system: "http://example.org/local-codes"));
+
+        Assert.Equal("conditional", Value(information, "pa-needed", "valueCode"));
+        Assert.Contains("not recognised", Sub(information, "reason").GetProperty("valueCodeableConcept").GetProperty("text").GetString());
     }
 
     [Fact]
@@ -166,7 +218,7 @@ public class CrdAndDtrTests(ApiFactory factory) : IClassFixture<ApiFactory>, IAs
     [Fact]
     public async Task Order_select_answers_only_the_selected_orders_and_never_asks_for_documentation()
     {
-        var orders = new[] { Order("H2019", "Coverage/cov-1", id: "order-1"), Order("H0019", "Coverage/cov-1", id: "order-2") };
+        var orders = new[] { Order("H2019", "Coverage/cov-1", id: "order-1"), Order("H2012", "Coverage/cov-1", id: "order-2") };
 
         var response = await CallHook(OrderSelect, Hook("order-select", orders, selections: ["ServiceRequest/order-2"]));
         var resource = Assert.Single(response.GetProperty("systemActions").EnumerateArray()).GetProperty("resource");
@@ -350,33 +402,76 @@ public class CrdAndDtrTests(ApiFactory factory) : IClassFixture<ApiFactory>, IAs
     [Fact]
     public async Task The_questionnaire_package_can_be_chosen_from_the_order_and_carries_the_services_questions()
     {
-        var parameters = Parameters(CoverageParameter(), $$"""{ "name": "order", "resource": {{Order("H0019", "Coverage/cov-1")}} }""");
+        var parameters = Parameters(CoverageParameter(), $$"""{ "name": "order", "resource": {{Order("H2012", "Coverage/cov-1")}} }""");
 
         var body = await PostPackage(parameters);
         var questionnaire = body.GetProperty("parameter")[0].GetProperty("resource").GetProperty("entry")[0].GetProperty("resource");
-        var asam = questionnaire.GetProperty("item").EnumerateArray().Single(i => i.GetProperty("linkId").GetString() == "asam-level");
+        var schedule = questionnaire.GetProperty("item").EnumerateArray().Single(i => i.GetProperty("linkId").GetString() == "schedule");
 
-        Assert.Equal("prior-auth-h0019", questionnaire.GetProperty("id").GetString());
-        Assert.Equal("choice", asam.GetProperty("type").GetString());
-        Assert.True(asam.GetProperty("required").GetBoolean());
-        Assert.Equal(["3.1", "3.3", "3.5"], asam.GetProperty("answerOption").EnumerateArray().Select(o => o.GetProperty("valueCoding").GetProperty("display").GetString()!).ToArray());
+        Assert.Equal("dtr-mhp-day-treatment", questionnaire.GetProperty("id").GetString());
+        Assert.Equal("choice", schedule.GetProperty("type").GetString());
+        Assert.True(schedule.GetProperty("required").GetBoolean());
+        Assert.Equal(["Half day", "Full day"], schedule.GetProperty("answerOption").EnumerateArray().Select(o => o.GetProperty("valueCoding").GetProperty("display").GetString()!).ToArray());
+    }
+
+    [Fact]
+    public async Task Two_services_that_share_a_questionnaire_get_one_package_naming_both_orders()
+    {
+        // TBS (H2019) and therapeutic foster care (S5145) are documented on the same questionnaire.
+        var parameters = Parameters(CoverageParameter(),
+            $$"""{ "name": "order", "resource": {{Order("H2019", "Coverage/cov-1", id: "order-tbs")}} }""",
+            $$"""{ "name": "order", "resource": {{Order("S5145", "Coverage/cov-1", id: "order-tfc")}} }""");
+
+        var body = await PostPackage(parameters);
+        var package = Assert.Single(body.GetProperty("parameter").EnumerateArray(), p => p.GetProperty("name").GetString() == "PackageBundle");
+        var questionnaire = package.GetProperty("resource").GetProperty("entry")[0].GetProperty("resource");
+        var contexts = DraftResponse(package).GetProperty("extension").EnumerateArray().Where(e => e.GetProperty("url").GetString() == QrContext)
+            .Select(e => e.GetProperty("valueReference").GetProperty("reference").GetString()!).ToArray();
+
+        Assert.Equal("dtr-mhp-youth", questionnaire.GetProperty("id").GetString());
+        Assert.Equal(["Coverage/cov-1", "ServiceRequest/order-tbs", "ServiceRequest/order-tfc"], contexts.Order().ToArray());
+    }
+
+    [Fact]
+    public async Task An_order_whose_code_needs_a_modifier_to_decide_gets_no_questionnaire_and_a_warning_saying_why()
+    {
+        var parameters = Parameters(CoverageParameter(),
+            $$"""{ "name": "order", "resource": {{Order("H2019", "Coverage/cov-1")}} }""",
+            $$"""{ "name": "order", "resource": {{Order("H0019", "Coverage/cov-1", id: "order-2")}} }""");
+
+        var body = await PostPackage(parameters);
+        var issue = Assert.Single(body.GetProperty("parameter").EnumerateArray().Single(p => p.GetProperty("name").GetString() == "operationOutcome")
+            .GetProperty("resource").GetProperty("issue").EnumerateArray());
+
+        Assert.Contains("ServiceRequest/order-2", issue.GetProperty("diagnostics").GetString());
+        Assert.Contains("modifier", issue.GetProperty("diagnostics").GetString());
+    }
+
+    [Fact]
+    public async Task A_draft_questionnaire_says_it_is_a_draft_and_lists_the_documents_to_send()
+    {
+        var questionnaire = await _signedIn.GetFromJsonAsync<JsonElement>("/fhir/Questionnaire/dtr-dmcods-residential");
+
+        Assert.Equal("draft", questionnaire.GetProperty("status").GetString());
+        Assert.Contains("ASAM assessment", questionnaire.GetProperty("description").GetString());
+        Assert.Contains("Draft", questionnaire.GetProperty("text").GetProperty("div").GetString());
     }
 
     [Theory]
     [InlineData("http://localhost/fhir/Questionnaire/prior-auth-nope|1")]
-    [InlineData("http://localhost/fhir/Questionnaire/prior-auth-h2019|2")]
-    [InlineData("https://elsewhere.example/fhir/Questionnaire/prior-auth-h2019")]
+    [InlineData("http://localhost/fhir/Questionnaire/dtr-mhp-youth|2")]
+    [InlineData("https://elsewhere.example/fhir/Questionnaire/dtr-mhp-youth")]
     public async Task A_questionnaire_that_cannot_be_found_is_reported_as_a_warning_next_to_the_ones_that_can(string unknown)
     {
         var parameters = Parameters(CoverageParameter(),
             $$"""{ "name": "questionnaire", "valueCanonical": "{{unknown}}" }""",
-            $$"""{ "name": "questionnaire", "valueCanonical": "http://localhost/fhir/Questionnaire/prior-auth-h0019|1" }""");
+            $$"""{ "name": "questionnaire", "valueCanonical": "http://localhost/fhir/Questionnaire/dtr-mhp-day-treatment|1" }""");
 
         var body = await PostPackage(parameters);
         var outcome = body.GetProperty("parameter").EnumerateArray().Single(p => p.GetProperty("name").GetString() == "operationOutcome").GetProperty("resource");
         var package = Assert.Single(body.GetProperty("parameter").EnumerateArray(), p => p.GetProperty("name").GetString() == "PackageBundle");
 
-        Assert.Equal("prior-auth-h0019", package.GetProperty("resource").GetProperty("entry")[0].GetProperty("resource").GetProperty("id").GetString());
+        Assert.Equal("dtr-mhp-day-treatment", package.GetProperty("resource").GetProperty("entry")[0].GetProperty("resource").GetProperty("id").GetString());
         var issue = Assert.Single(outcome.GetProperty("issue").EnumerateArray());
         Assert.Equal("warning", issue.GetProperty("severity").GetString());
         Assert.Contains(unknown, issue.GetProperty("diagnostics").GetString());
@@ -412,10 +507,11 @@ public class CrdAndDtrTests(ApiFactory factory) : IClassFixture<ApiFactory>, IAs
     [Fact]
     public async Task A_questionnaire_can_be_read_by_its_id_and_declares_the_DTR_profile()
     {
-        var questionnaire = await _signedIn.GetFromJsonAsync<JsonElement>("/fhir/Questionnaire/prior-auth-h2019");
+        var questionnaire = await _signedIn.GetFromJsonAsync<JsonElement>("/fhir/Questionnaire/dtr-mhp-youth");
 
         Assert.Equal("http://hl7.org/fhir/us/davinci-dtr/StructureDefinition/dtr-std-questionnaire", questionnaire.GetProperty("meta").GetProperty("profile")[0].GetString());
-        Assert.Equal("active", questionnaire.GetProperty("status").GetString());
+        // Not yet signed off by the plan's clinical lead, so published as a draft.
+        Assert.Equal("draft", questionnaire.GetProperty("status").GetString());
         Assert.False(string.IsNullOrEmpty(questionnaire.GetProperty("text").GetProperty("div").GetString()));
     }
 
@@ -459,7 +555,7 @@ public class CrdAndDtrTests(ApiFactory factory) : IClassFixture<ApiFactory>, IAs
     }
 
     [Theory]
-    [InlineData("GET", "/fhir/Questionnaire/prior-auth-h2019")]
+    [InlineData("GET", "/fhir/Questionnaire/dtr-mhp-youth")]
     [InlineData("POST", "/fhir/Questionnaire/$questionnaire-package")]
     [InlineData("POST", "/fhir/Questionnaire/$log-questionnaire-errors")]
     [InlineData("GET", "/fhir/ValueSet/$expand?url=http://example.org/ValueSet/x")]
@@ -472,7 +568,7 @@ public class CrdAndDtrTests(ApiFactory factory) : IClassFixture<ApiFactory>, IAs
     }
 
     [Theory]
-    [InlineData("GET", "/fhir/Questionnaire/prior-auth-h2019")]
+    [InlineData("GET", "/fhir/Questionnaire/dtr-mhp-youth")]
     [InlineData("POST", "/fhir/Questionnaire/$log-questionnaire-errors")]
     [InlineData("GET", "/fhir/ValueSet/$expand?url=http://example.org/ValueSet/x")]
     public async Task A_token_without_the_questionnaire_scope_cannot_read_questionnaires(string method, string path)
@@ -490,27 +586,33 @@ public class CrdAndDtrTests(ApiFactory factory) : IClassFixture<ApiFactory>, IAs
     public async Task Questionnaire_answers_sent_with_a_request_reach_the_reviewer_as_readable_text()
     {
         var answers = """
-            { "resource": { "resourceType": "QuestionnaireResponse", "questionnaire": "http://localhost/fhir/Questionnaire/prior-auth-h2019|1", "status": "completed",
+            { "resource": { "resourceType": "QuestionnaireResponse", "questionnaire": "http://localhost/fhir/Questionnaire/dtr-mhp-youth|1", "status": "completed",
                 "item": [
                   { "linkId": "assessment-date", "answer": [{ "valueDate": "2026-10-30" }] },
                   { "linkId": "placement-risk", "answer": [{ "valueBoolean": true }] },
-                  { "linkId": "hours-per-week", "answer": [{ "valueCoding": { "code": "11-to-20", "display": "11 to 20" } }] }
+                  { "linkId": "amount-requested", "answer": [{ "valueString": "10 hours per week" }] }
                 ] } }
             """;
         var submitted = await _signedIn.PostAsync("/fhir/Claim/$submit", Fhir(RequestBundle($"REQ-{Guid.NewGuid():N}", answers)));
         var id = (await submitted.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("entry")[0].GetProperty("resource").GetProperty("id").GetString();
 
-        var entry = (await _anonymous.GetFromJsonAsync<JsonElement>("/internal/requests")).EnumerateArray().Single(r => r.GetProperty("id").GetString() == id);
+        var entry = (await factory.CreateClient().GetFromJsonAsync<JsonElement>("/internal/requests")).EnumerateArray().Single(r => r.GetProperty("id").GetString() == id);
         var document = Assert.Single(entry.GetProperty("documents").EnumerateArray());
-        var text = await _anonymous.GetStringAsync($"/internal/requests/{id}/documents/{document.GetProperty("id").GetString()}");
+        var text = await factory.CreateClient().GetStringAsync($"/internal/requests/{id}/documents/{document.GetProperty("id").GetString()}");
 
-        Assert.Equal("Questionnaire answers: Therapeutic Behavioral Services", document.GetProperty("title").GetString());
+        Assert.Equal("Questionnaire answers: Therapeutic behavioral services or therapeutic foster care", document.GetProperty("title").GetString());
         Assert.Contains("Date of the most recent assessment: 2026-10-30", text);
-        Assert.Contains("Is the member at risk of a higher level of placement without TBS?: Yes", text);
-        Assert.Contains("Requested hours per week: 11 to 20", text);
+        Assert.Contains("Without this service, is the member at risk of a higher level of care, or unable to move to a lower one?: Yes", text);
+        Assert.Contains("Amount requested (TBS: hours per week; TFC: placement start date and expected length): 10 hours per week", text);
     }
 
     // ---------- Helpers ----------
+
+    private const string RevenueCodes = "https://www.nubc.org/CodeSystem/RevenueCodes";
+
+    /// <summary>The coverage information order-sign attaches to one order.</summary>
+    private async Task<JsonElement> AnswerFor(string order) =>
+        CoverageInfo(Assert.Single((await CallHook(OrderSign, Hook("order-sign", order))).GetProperty("systemActions").EnumerateArray()).GetProperty("resource"));
 
     private static JsonElement CoverageInfo(JsonElement resource) =>
         resource.GetProperty("extension").EnumerateArray().Single(e => e.GetProperty("url").GetString() == CoverageInformation);
@@ -564,9 +666,9 @@ public class CrdAndDtrTests(ApiFactory factory) : IClassFixture<ApiFactory>, IAs
     }
 
     /// <summary>A draft ServiceRequest. By default it has what the CRD ServiceRequest profile requires (authoredOn, requester).</summary>
-    private static string Order(string code, string? coverage, string id = "order-1", bool conformant = true) => $$"""
+    private static string Order(string code, string? coverage, string id = "order-1", bool conformant = true, string? system = null) => $$"""
         { "resourceType": "ServiceRequest", "id": "{{id}}", "status": "draft", "intent": "order",
-          "code": { "coding": [{ "system": "{{PasFixtures.SystemFor(code)}}", "code": "{{code}}" }] },
+          "code": { "coding": [{ "system": "{{system ?? PasFixtures.SystemFor(code)}}", "code": "{{code}}" }] },
           "subject": { "reference": "Patient/synthetic-1" }{{(conformant ? """, "authoredOn": "2026-11-11", "requester": { "reference": "Practitioner/synthetic-1" }""" : "")}}{{(coverage is null ? "" : $$""", "insurance": [{ "reference": "{{coverage}}" }]""")}} }
         """;
 

@@ -4,18 +4,18 @@ using PriorAuth.Api.Data;
 
 namespace PriorAuth.Api.Auth;
 
-/// <summary>Internal endpoints agency staff use to register a provider's system. Not part of the FHIR API.</summary>
+/// <summary>Internal endpoints plan admins use to register a provider's system. Not part of the FHIR API. The portal's Provider systems page does the same.</summary>
 public static class ClientRegistrationEndpoints
 {
     public static void MapClientRegistrationEndpoints(this WebApplication app)
     {
-        var group = app.MapGroup("/internal/clients").LocalCallersOnly();
+        var group = app.MapGroup("/internal/clients").StaffOnly(StaffSignIn.AdminPolicy);
 
         group.MapGet("", async (PriorAuthDb db) => Results.Json(
             (await db.ProviderClients.OrderBy(c => c.Name).ToListAsync())
-            .Select(c => new { c.ClientId, c.Name, c.Active, c.RegisteredAtUtc })));
+            .Select(c => new { c.ClientId, c.Name, c.ContactEmail, c.Active, c.RegisteredAtUtc })));
 
-        // The body is { "name": "...", "jwks": { "keys": [ ... ] } }. It is read by hand so that a body of the
+        // The body is { "name": "...", "contactEmail": "..." (optional), "jwks": { "keys": [ ... ] } }. It is read by hand so that a body of the
         // wrong shape gets a clear 400 or 422 instead of a model-binding exception.
         group.MapPost("", async (HttpRequest http, PriorAuthDb db, TimeProvider clock) =>
         {
@@ -34,7 +34,14 @@ public static class ClientRegistrationEndpoints
                 var problem = ClientKeys.CheckKeySet(jwks);
                 if (problem is not null) return Refuse(problem);
 
-                var client = ProviderClient.Register(name.GetString()!, jwks.GetRawText(), clock.GetUtcNow().UtcDateTime);
+                string? contactEmail = null;
+                if (body.TryGetProperty("contactEmail", out var email) && email.ValueKind == JsonValueKind.String)
+                {
+                    contactEmail = email.GetString()!.Trim();
+                    if (contactEmail.Length > 0 && !ProviderClient.LooksLikeEmail(contactEmail)) return Refuse("The contact email is not an email address.");
+                }
+
+                var client = ProviderClient.Register(name.GetString()!, jwks.GetRawText(), clock.GetUtcNow().UtcDateTime, contactEmail);
                 db.ProviderClients.Add(client);
                 await db.SaveChangesAsync();
                 return Results.Json(new { client.ClientId, client.Name }, statusCode: StatusCodes.Status201Created);

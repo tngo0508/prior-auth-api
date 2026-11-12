@@ -8,8 +8,8 @@ using PriorAuth.Api.Dtr;
 using PriorAuth.Api.Fhir;
 using PriorAuth.Api.Review;
 
-// NOT READY TO DEPLOY. Provider systems must sign in, but agency staff sign-in does not exist yet:
-// the internal endpoints only answer callers on the same machine. Use synthetic data only.
+// NOT READY TO DEPLOY. Provider systems and plan staff must sign in, but there is no audit log yet and keys are not
+// kept across restarts (phase 4). Use synthetic data only.
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -20,9 +20,26 @@ builder.Services.AddDbContext<PriorAuthDb>((services, options) =>
 builder.Services.AddSingleton<FhirJson>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<PlanClock>();
-builder.Services.AddSingleton(services => new ServiceRequirementCatalog(
-    services.GetRequiredService<IConfiguration>().GetSection("ServiceRequirements").Get<ServiceRequirement[]>() ?? []));
+builder.Services.AddSingleton(services =>
+{
+    var config = services.GetRequiredService<IConfiguration>();
+    return new ServiceRequirementCatalog(
+        config.GetSection("ServiceRequirements").Get<ServiceRequirement[]>() ?? [],
+        config.GetSection("Questionnaires").Get<QuestionnaireDefinition[]>() ?? []);
+});
 builder.Services.AddProviderSignIn();
+builder.Services.AddStaffSignIn(builder.Configuration, builder.Environment);
+builder.Services.AddSingleton<DenialReasons>();
+builder.Services.AddScoped<ReviewDesk>();
+builder.Services.AddRazorPages(options =>
+{
+    // Every page needs a signed-in staff member with a role. The pages below narrow it further.
+    options.Conventions.AuthorizeFolder("/", StaffSignIn.AnyRolePolicy);
+    options.Conventions.AuthorizeFolder("/Requests", StaffSignIn.QueuePolicy);
+    options.Conventions.AuthorizeFolder("/Providers", StaffSignIn.AdminPolicy);
+    options.Conventions.AllowAnonymousToPage("/NoAccess");
+    options.Conventions.AllowAnonymousToPage("/SignIn/DevSignIn");
+});
 builder.Services.AddHealthChecks().AddCheck<DatabaseHealthCheck>("database");
 builder.WebHost.ConfigureKestrel(kestrel => kestrel.AddServerHeader = false);
 
@@ -32,6 +49,7 @@ var app = builder.Build();
 // instead of failing every call.
 app.Services.GetRequiredService<ServiceRequirementCatalog>();
 app.Services.GetRequiredService<PlanClock>();
+app.Services.GetRequiredService<DenialReasons>();
 // Outside Development the public https address must be configured; it is never taken from the caller's Host header.
 PublicUrl.ValidateConfiguration(app.Configuration, app.Environment);
 
@@ -65,12 +83,9 @@ app.Use(async (context, next) =>
     headers["Referrer-Policy"] = "no-referrer";
     headers.XFrameOptions = "DENY";
     headers.ContentSecurityPolicy = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
-    var path = context.Request.Path;
-    if (path.StartsWithSegments("/fhir") || path.StartsWithSegments("/internal") || path.StartsWithSegments("/auth") || path.StartsWithSegments("/cds-services"))
-    {
-        headers.CacheControl = "no-store";
-        headers.Pragma = "no-cache";
-    }
+    // Every answer, the portal pages included, may hold member information or depend on who is signed in.
+    headers.CacheControl = "no-store";
+    headers.Pragma = "no-cache";
     await next();
 });
 
@@ -94,7 +109,6 @@ app.UseWhen(context => context.Request.Path.StartsWithSegments("/fhir"), fhirApp
     await next();
 }));
 
-app.UseDefaultFiles();
 app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();
@@ -103,7 +117,16 @@ app.UseAuthorization();
 app.UseStatusCodePages(async context =>
 {
     var http = context.HttpContext;
-    if (!http.Request.Path.StartsWithSegments("/fhir")) return;
+    var path = http.Request.Path;
+    // Windows sign-in answers a portal page the person has no role for with a bare 403. Show them who to ask instead.
+    // (The Development sign-in redirects there itself.)
+    if (http.Response.StatusCode == StatusCodes.Status403Forbidden && HttpMethods.IsGet(http.Request.Method)
+        && !path.StartsWithSegments("/internal") && !path.StartsWithSegments("/fhir") && !path.StartsWithSegments("/auth") && !path.StartsWithSegments("/cds-services"))
+    {
+        http.Response.Redirect("/no-access");
+        return;
+    }
+    if (!path.StartsWithSegments("/fhir")) return;
     var status = http.Response.StatusCode;
     var message = status switch
     {
@@ -121,6 +144,8 @@ app.MapCrdEndpoints();
 app.MapDtrEndpoints();
 app.MapReviewerEndpoints();
 app.MapClientRegistrationEndpoints();
+app.MapStaffSignIn();
+app.MapRazorPages();
 
 app.Run();
 

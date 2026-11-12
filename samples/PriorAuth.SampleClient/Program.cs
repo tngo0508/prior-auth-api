@@ -15,7 +15,8 @@ using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 
 var baseUrl = (args.FirstOrDefault() ?? "http://localhost:5020").TrimEnd('/');
-using var http = new HttpClient { BaseAddress = new Uri(baseUrl) };
+// Keeps the plan admin's sign-in cookie for step 2.
+using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { BaseAddress = new Uri(baseUrl) };
 
 // 1. The provider creates a key pair. The private key never leaves the provider.
 using var key = RSA.Create(2048);
@@ -31,8 +32,12 @@ var publicKeySet = new
 Step(1, "Created a key pair. Only the public half is shared.");
 
 // 2. Agency staff register the provider's public key. In real life this is a one-time onboarding
-//    step done by the agency, not by the provider's software. It only works from the server's own machine.
-//    The internal endpoints refuse changes that do not carry the reviewer page's header.
+//    step done by a plan admin on the portal's Provider systems page, not by the provider's software.
+//    Here the sample signs in as the Development test admin, which exists only when the API runs in Development.
+//    The internal endpoints also refuse changes that do not carry the X-Requested-By header.
+var adminSignIn = await http.PostAsync("/staff/dev-sign-in", new FormUrlEncodedContent([new("account", @"DEV\ari.admin"), new("returnUrl", "/")]));
+if (adminSignIn.StatusCode != System.Net.HttpStatusCode.Redirect)
+    throw new InvalidOperationException("Could not sign in as the test admin. Run the API in the Development environment.");
 var registrationCall = new HttpRequestMessage(HttpMethod.Post, "/internal/clients") { Content = JsonContent.Create(new { name = "Sample Clinic (synthetic)", jwks = publicKeySet }) };
 registrationCall.Headers.Add("X-Requested-By", "prior-auth-reviewer");
 var registration = await http.SendAsync(registrationCall);
@@ -197,10 +202,12 @@ static string RequestBundle(string requestId, string code, string questionnaireU
             "questionnaire": "{{questionnaireUrl}}",
             "status": "completed",
             "item": [
+              { "linkId": "under-21", "answer": [{ "valueBoolean": true }] },
               { "linkId": "assessment-date", "answer": [{ "valueDate": "2026-10-30" }] },
+              { "linkId": "diagnosis", "answer": [{ "valueString": "Synthetic example diagnosis." }] },
               { "linkId": "target-behaviours", "answer": [{ "valueString": "Synthetic example: elopement and aggression at school." }] },
               { "linkId": "placement-risk", "answer": [{ "valueBoolean": true }] },
-              { "linkId": "hours-per-week", "answer": [{ "valueCoding": { "system": "{{questionnaireUrl.Split("/fhir/")[0]}}/fhir/CodeSystem/prior-auth-answers", "code": "11-to-20", "display": "11 to 20" } }] }
+              { "linkId": "amount-requested", "answer": [{ "valueString": "10 hours per week" }] }
             ]
           }
         }

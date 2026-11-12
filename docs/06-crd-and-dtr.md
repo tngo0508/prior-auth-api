@@ -49,26 +49,27 @@ CRD is built on **CDS Hooks**, a general way for an EHR to ask an outside servic
 
 The EHR sends the draft orders. For each `ServiceRequest`, the server sends the order back with a **coverage information** extension added. The EHR applies it as a "system action", which means it updates the order without asking the clinician to click anything.
 
-The order's code must say which code system it comes from, for example HCPCS (`http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets`) or CPT (`http://www.ama-assn.org/go/cpt`). A code only matches the plan's list when its system matches too, so a code sent without a system is treated as not on the list.
+The order's code must say which code system it comes from: HCPCS (`http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets`), CPT (`http://www.ama-assn.org/go/cpt`) or NUBC revenue codes (`https://www.nubc.org/CodeSystem/RevenueCodes`). A code only matches the plan's list when its system matches too. How codes and modifiers are matched, and why, is in [9. The service list](09-service-list.md).
 
 What the extension says:
 
-| Part | Service is on the plan's list | Service is not on the list |
-|---|---|---|
-| `covered` | `covered` | `conditional` |
-| `pa-needed` | `auth-needed` | `no-auth` |
-| `doc-needed` | `clinical` (order-sign only) | left out |
-| `doc-purpose` | `withpa`: the documentation goes with the prior authorization request (order-sign only) | left out |
-| `questionnaire` | Address of the service's questionnaire (order-sign only) | left out |
-| `coverage` | The member's coverage the answer applies to | same |
-| `date` | Today, in the plan's time zone | same |
-| `coverage-assertion-id` | A unique id for this answer | same |
+| Part | Prior authorization | Concurrent review | No prior authorization, or not on the list | Ambiguous or unrecognised code |
+|---|---|---|---|---|
+| `covered` | `conditional` | `conditional` | `conditional` | `conditional` |
+| `pa-needed` | `auth-needed` | `no-auth` | `no-auth` | `conditional` |
+| `doc-needed` | `clinical` (order-sign only) | left out | left out | left out |
+| `doc-purpose` | `withpa`: the documentation goes with the prior authorization request (order-sign only) | left out | left out | left out |
+| `questionnaire` | Address of the service's questionnaire (order-sign only) | left out | left out | left out |
+| `reason` | left out | Notify the plan within 24 hours of admission through `$submit`, with the questionnaire's address | "may not require prior authorization" for a listed service; "not on the plan's list" otherwise | Which modifiers need review, or a request to check the code |
+| `coverage`, `date`, `coverage-assertion-id` | The member's coverage, today in the plan's time zone, a unique id for this answer | same | same | same |
+
+An order carries no billing modifiers. When the entries for a code differ only by modifier and lead to the same rule and questionnaire (day treatment intensive and day rehabilitation, both `H2012`), the answer is definite. When they lead to different rules (`H0019`: adult residential needs no authorization, the DMC-ODS residential levels do), the answer is `conditional`.
 
 The two hooks differ. CRD calls `order-sign` a primary hook: every order gets an answer, including what documentation is needed. `order-select` is a secondary hook: it answers only the orders listed in `context.selections` (which it requires), and never says documentation is needed.
 
 Things to understand about these answers:
 
-- **This service does not check eligibility.** It does not know whether the member is enrolled today. For a service on the list it says `covered` because the service is a plan benefit. For anything else it says `conditional` and never claims coverage it has not checked.
+- **This service does not check eligibility.** It does not know whether the member is enrolled in the plan's program today, so `covered` is always `conditional`. It never claims coverage it has not checked.
 - **A coverage must be named.** The extension has to say which coverage it speaks for. The server takes it from the order, or from coverage the EHR sent ahead of time ("prefetch"). If neither is there, the server changes nothing and returns an information card explaining why.
 - **An incomplete order is explained, not annotated.** The CRD order profile requires `authoredOn` and `requester`. An order missing either gets a card saying what to add.
 - **Nothing new, no update.** If the order already carries the same answer for the same coverage, it is not sent back. An answer for a different coverage is kept; only the one for this coverage is replaced.
@@ -89,12 +90,12 @@ CDS Hooks does not use the access token from [sign-in](05-sign-in.md). Every cal
 
 ## DTR: what do you need to know?
 
-Each service on the list has a questionnaire. Its questions come from `Questions` in [service-requirements.json](../src/PriorAuth.Api/service-requirements.json), so clinical policy staff can change them without touching code. The questions there today are placeholders.
+Each reviewed service names a questionnaire, and several services can share one (TBS and TFC share `dtr-mhp-youth`). The questionnaires are defined in the `Questionnaires` section of [service-requirements.json](../src/PriorAuth.Api/service-requirements.json), so clinical policy staff can change them without touching code. All of them are drafts written from the DHCS notices: they are published with FHIR status `draft` and say so in their text until the plan's clinical lead signs them off. Each lists the documents to send in its `description`.
 
 | Address | Purpose |
 |---|---|
 | `POST /fhir/Questionnaire/$questionnaire-package` | Returns the questionnaire package. Name the questionnaire, or send the order and let the plan choose. |
-| `GET /fhir/Questionnaire/{id}` | Reads one questionnaire, for example `prior-auth-h2019`. |
+| `GET /fhir/Questionnaire/{id}` | Reads one questionnaire, for example `dtr-mhp-youth`. |
 | `POST /fhir/Questionnaire/$log-questionnaire-errors` | A DTR app reports a problem it had with one of the plan's questionnaires. |
 | `GET` or `POST /fhir/ValueSet/$expand` | Required by the DTR payer capability statement. The plan publishes no value sets (answer options are listed inside each questionnaire), so the answer is always 404. |
 
@@ -108,7 +109,7 @@ The request is a `Parameters` resource. It may hold:
 
 | Parameter | Meaning |
 |---|---|
-| `questionnaire` | A questionnaire's full canonical address, for example `https://host/fhir/Questionnaire/prior-auth-h2019`, optionally with `\|1` for the version. The whole address must match this server's; a bare id or another server's address is not found. |
+| `questionnaire` | A questionnaire's full canonical address, for example `https://host/fhir/Questionnaire/dtr-mhp-youth`, optionally with `\|1` for the version. The whole address must match this server's; a bare id or another server's address is not found. |
 | `order` | A `ServiceRequest`. The plan picks the questionnaire from its code, matched on code system and code. |
 | `coverage` | The member's `Coverage`. DTR expects one. |
 
@@ -156,7 +157,7 @@ These are real gaps against the two guides, tracked in [issue #16](https://githu
 - **No automatic filling of answers.** DTR's main benefit is that the EHR can fill answers from the chart using rules (CQL) supplied by the plan. These questionnaires carry no such rules, so a person types every answer. The DTR profile permits this, but the time saving is not delivered.
 - **Only two hooks.** `order-sign` and `order-select` are offered. The guide also names `order-dispatch`, `appointment-book`, `encounter-start` and `encounter-discharge`.
 - **Only `ServiceRequest` orders are examined.** Device, medication and other order types are skipped (and logged).
-- **No eligibility check**, as described above. A service not on the plan's list is answered `no-auth`, even when the plan simply does not know the code ([issue #23](https://github.com/tngo0508/prior-auth-api/issues/23)).
+- **No eligibility check**, as described above. A well-formed code that is not on the plan's list is answered `no-auth`, which is correct for services DHCS exempts. A code the plan cannot recognise is answered `conditional` ([issue #23](https://github.com/tngo0508/prior-auth-api/issues/23)). The plan's full list of covered codes would let the service tell an exempt service from one that is not a benefit at all.
 - **One configuration option only.** `coverage-info` can be turned off; there are no finer options.
 - **The answer is not remembered.** The `coverage-assertion-id` is not stored or matched to the later request.
 - **Required answers are not enforced.** A request is accepted even if a required question is unanswered. The reviewer's copy names the unanswered required questions, and the reviewer judges completeness.

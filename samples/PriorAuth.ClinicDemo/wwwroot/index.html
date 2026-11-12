@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sunrise Clinic: prior authorization demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #12343B;
+    --ink-soft: #4C6469;
+    --paper: #F3F7F7;
+    --panel: #FFFFFF;
+    --rule: #D3E0E1;
+    --sun: #E8A33D;
+    --sun-wash: #FCF1DF;
+    --yes: #2E7D5B;
+    --no: #B03A2E;
+    --wait: #5A6B70;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font: 400 1.125rem/1.55 "Atkinson Hyperlegible", system-ui, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
+    padding: 1.25rem clamp(1rem, 4vw, 3rem);
+    border-bottom: 1px solid var(--rule);
+    background: var(--panel);
+  }
+  header h1 { margin: 0; font-size: 1.5rem; }
+  header p { margin: 0; color: var(--ink-soft); font-size: 1rem; }
+  main {
+    display: grid; grid-template-columns: minmax(14rem, 20rem) 1fr; gap: clamp(1.5rem, 4vw, 3.5rem);
+    padding: 2rem clamp(1rem, 4vw, 3rem) 4rem; max-width: 78rem; margin: 0 auto;
+  }
+  .order { align-self: start; }
+  @media (min-width: 901px) { .order { position: sticky; top: 1.5rem; } }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .order h2 { font-size: 1.125rem; margin: 0 0 .75rem; color: var(--ink-soft); font-weight: 400; }
+  .order dl { margin: 0; display: grid; gap: .9rem; }
+  .order dt { font-size: .9rem; color: var(--ink-soft); }
+  .order dd { margin: 0; font-weight: 700; font-size: 1.2rem; line-height: 1.3; }
+  .order .note { margin-top: 1.5rem; font-size: .9rem; color: var(--ink-soft); }
+
+  ol.steps { list-style: none; margin: 0; padding: 0; counter-reset: step; }
+  .step {
+    counter-increment: step; position: relative;
+    padding: 0 0 2.25rem 4rem; border-left: 3px solid var(--rule); margin-left: 1.25rem;
+  }
+  .step:last-child { border-left-color: transparent; }
+  .step::before {
+    content: counter(step); position: absolute; left: -1.4rem; top: -.2rem;
+    width: 2.6rem; height: 2.6rem; border-radius: 50%;
+    display: grid; place-items: center; font-weight: 700; font-size: 1.2rem;
+    background: var(--paper); border: 3px solid var(--rule); color: var(--ink-soft);
+  }
+  .step.current::before { background: var(--sun); border-color: var(--sun); color: var(--ink); }
+  .step.done::before { background: var(--ink); border-color: var(--ink); color: var(--paper); content: "✓"; }
+  .step.done { border-left-color: var(--ink); }
+  .step.locked { opacity: .45; }
+  .step.done > button { display: none; }
+  .step h3 { margin: 0 0 .2rem; font-size: 1.45rem; line-height: 1.25; }
+  .step .who { margin: 0 0 1rem; color: var(--ink-soft); }
+
+  button {
+    font: inherit; font-weight: 700; cursor: pointer;
+    padding: .7rem 1.4rem; border-radius: .5rem; border: 2px solid var(--ink);
+    background: var(--ink); color: var(--paper);
+  }
+  button.quiet { background: transparent; color: var(--ink); }
+  button:disabled { cursor: default; opacity: .5; }
+  button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px solid var(--sun); outline-offset: 3px; }
+  a { color: var(--ink); font-weight: 700; }
+
+  .answer { margin-top: 1rem; padding: 1rem 1.25rem; background: var(--panel); border-left: 6px solid var(--wait); border-radius: 0 .5rem .5rem 0; }
+  .answer[hidden] { display: none; }
+  .answer .verdict { font-size: clamp(1.8rem, 3.4vw, 2.6rem); font-weight: 700; line-height: 1.15; margin: 0; }
+  .answer .speed { color: var(--ink-soft); margin: .15rem 0 0; }
+  .answer .detail { margin: .6rem 0 0; max-width: 60ch; }
+  .answer.yes { border-left-color: var(--yes); } .answer.yes .verdict { color: var(--yes); }
+  .answer.no { border-left-color: var(--no); } .answer.no .verdict { color: var(--no); }
+  .answer.attention { border-left-color: var(--sun); background: var(--sun-wash); }
+  .answer.form-answer .verdict { font-size: 1.35rem; }
+  .answer.error { border-left-color: var(--no); } .answer.error .verdict { font-size: 1.3rem; color: var(--no); }
+
+  table.form { border-collapse: collapse; width: 100%; max-width: 52rem; margin-top: .75rem; font-size: 1.05rem; }
+  table.form th, table.form td { text-align: left; vertical-align: top; padding: .55rem .75rem .55rem 0; border-bottom: 1px solid var(--rule); }
+  table.form th { font-weight: 400; color: var(--ink-soft); width: 55%; }
+  table.form td { font-weight: 700; }
+  .form-grid { display: grid; gap: 1rem; max-width: 52rem; margin-top: .9rem; }
+  .question label, .question legend { display: block; color: var(--ink-soft); margin-bottom: .3rem; padding: 0; }
+  .question fieldset { border: 0; margin: 0; padding: 0; }
+  .question .required { color: var(--no); }
+  .question input[type=text], .question input[type=date], .question select, .question textarea {
+    font: inherit; font-weight: 700; color: var(--ink); width: 100%; padding: .5rem .65rem;
+    border: 2px solid var(--rule); border-radius: .4rem; background: var(--panel);
+  }
+  .question input[type=date] { width: auto; }
+  .question textarea { min-height: 3.2rem; resize: vertical; }
+  .question input:focus-visible, .question select:focus-visible, .question textarea:focus-visible { outline: 3px solid var(--sun); outline-offset: 1px; }
+  .question .choices { display: flex; gap: 1.5rem; }
+  .question .choices label { display: inline-flex; gap: .4rem; align-items: center; color: var(--ink); font-weight: 700; margin: 0; }
+  .question.missing input, .question.missing select, .question.missing textarea { border-color: var(--no); }
+  .question .problem { color: var(--no); font-size: .95rem; margin: .25rem 0 0; }
+  .order select { font: inherit; font-weight: 700; color: var(--ink); width: 100%; padding: .45rem .5rem; border: 2px solid var(--rule); border-radius: .4rem; background: var(--panel); }
+  .send-problem { color: var(--no); font-weight: 700; margin: .6rem 0 0; }
+  .attached { margin: .75rem 0 0; }
+
+  details { margin-top: .9rem; font-size: .95rem; }
+  summary { cursor: pointer; color: var(--ink-soft); }
+  details pre { max-height: 22rem; overflow: auto; background: var(--ink); color: #E3EEEF; padding: 1rem; border-radius: .5rem; font-size: .8rem; line-height: 1.4; }
+  details h4 { margin: .8rem 0 .3rem; font-size: .95rem; }
+
+  .waiting-dot { display: inline-block; width: .7rem; height: .7rem; border-radius: 50%; background: var(--sun); margin-right: .5rem; animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
+  @media (prefers-reduced-motion: reduce) { .waiting-dot { animation: none; } }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Sunrise Clinic</h1>
+    <p>A pretend clinic system asking the county plan for approval. Synthetic data only.</p>
+  </div>
+  <button class="quiet" id="restart" type="button">Start again</button>
+</header>
+
+<main>
+  <aside class="order" aria-label="The order">
+    <h2>Today's order</h2>
+    <dl>
+      <div><dt>Member</dt><dd>Alex Testpatient</dd></div>
+      <div><dt><label for="service">Service</label></dt><dd><select id="service"><option>Loading the plan's list…</option></select></dd></div>
+      <div><dt>Plan</dt><dd>County Behavioral Health Plan</dd></div>
+    </dl>
+    <p class="note" id="service-note">Pick any service on the plan's list. Changing it starts a new request.</p>
+  </aside>
+
+  <ol class="steps">
+    <li class="step current" id="step-1">
+      <h3>The clinician signs the order</h3>
+      <p class="who">The clinic's system asks the plan, before the order is sent, whether approval is needed.</p>
+      <button type="button" id="check">Check with the plan</button>
+      <div class="answer" id="answer-1" hidden aria-live="polite"></div>
+    </li>
+    <li class="step locked" id="step-2">
+      <h3>The clinic fills in the plan's form</h3>
+      <p class="who">The plan says what it needs to decide. The clinic's system fills in what it knows from the record; change any answer before sending.</p>
+      <button type="button" id="form" disabled>Get the plan's form</button>
+      <div class="answer" id="answer-2" hidden aria-live="polite"></div>
+    </li>
+    <li class="step locked" id="step-3">
+      <h3>The clinic sends the request</h3>
+      <p class="who">The request goes to the plan with the answers and the assessment attached.</p>
+      <button type="button" id="send" disabled>Send the request</button>
+      <div class="answer" id="answer-3" hidden aria-live="polite"></div>
+    </li>
+    <li class="step locked" id="step-4">
+      <h3>A reviewer at the plan decides</h3>
+      <p class="who">A clinician at the plan reviews the request. The clinic's system checks back on its own.</p>
+      <div class="answer" id="answer-4" hidden aria-live="polite"></div>
+    </li>
+  </ol>
+</main>
+
+<script>
+  const $ = id => document.getElementById(id);
+  let reviewerPage = "http://localhost:5020/";
+  let polling = null;
+  let questions = [];
+
+  fetch("/demo/setup").then(r => r.json()).then(s => { reviewerPage = s.reviewerPage; }).catch(() => {});
+
+  function el(tag, props = {}, ...children) {
+    const { dataset, ...rest } = props;
+    const node = Object.assign(document.createElement(tag), rest);
+    if (dataset) Object.assign(node.dataset, dataset);
+    for (const child of children) if (child != null) node.append(child);
+    return node;
+  }
+
+  function technical(t) {
+    if (!t) return null;
+    if (typeof t === "string") return el("details", {}, el("summary", { textContent: "Technical detail" }), el("pre", { textContent: t }));
+    return el("details", {},
+      el("summary", { textContent: `Technical detail: ${t.what}` }),
+      el("h4", { textContent: `Sent to ${t.url}` }), el("pre", { textContent: t.sent }),
+      el("h4", { textContent: "The plan answered" }), el("pre", { textContent: t.received }));
+  }
+
+  function show(n, tone, verdict, extra = []) {
+    const box = $(`answer-${n}`);
+    box.className = `answer ${tone}`;
+    box.replaceChildren(el("p", { className: "verdict", textContent: verdict }), ...extra.filter(Boolean));
+    box.hidden = false;
+  }
+
+  // n is the step in progress; skipped steps are shown as done.
+  function stage(n) {
+    for (let i = 1; i <= 4; i++) $(`step-${i}`).className = "step " + (i < n ? "done" : i === n ? "current" : "locked");
+    $("check").disabled = n !== 1;
+    $("form").disabled = n !== 2;
+    $("send").disabled = n !== 3;
+  }
+
+  async function call(path, body) {
+    try {
+      const response = await fetch(path, body === undefined
+        ? { method: "POST" }
+        : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      return await response.json();
+    } catch {
+      return { ok: false, headline: "The clinic demo is not running. Start it and reload this page." };
+    }
+  }
+
+  function failed(n, result) {
+    show(n, "error", result.headline, [technical(result.technical)]);
+  }
+
+  function clearStory() {
+    clearInterval(polling); polling = null;
+    questions = [];
+    for (let i = 1; i <= 4; i++) $(`answer-${i}`).hidden = true;
+    stage(1);
+  }
+
+  // ---- The service picker, filled from the plan's published list.
+
+  async function loadServices() {
+    let r;
+    try { r = await (await fetch("/demo/services")).json(); }
+    catch { r = { ok: false, headline: "The clinic demo is not running. Start it and reload this page." }; }
+    const select = $("service");
+    if (!r.ok) {
+      select.replaceChildren(el("option", { textContent: "The plan's list is not available" }));
+      $("service-note").textContent = r.headline;
+      return;
+    }
+    const groups = {};
+    for (const s of r.services) (groups[s.program] ??= []).push(s);
+    select.replaceChildren(...Object.entries(groups).map(([program, list]) =>
+      el("optgroup", { label: program === "DMC-ODS" ? "Substance use (DMC-ODS)" : "Mental health (SMHS)" },
+        ...list.map(s => el("option", { value: s.id, textContent: s.name, selected: s.id === r.selected })))));
+    $("service-note").textContent = "Pick any service on the plan's list. Changing it starts a new request.";
+  }
+
+  $("service").addEventListener("change", async event => {
+    clearStory();
+    const r = await call("/demo/service", { id: event.target.value });
+    if (!r.ok) failed(1, r);
+  });
+
+  // ---- Step 1: check with the plan.
+
+  $("check").addEventListener("click", async () => {
+    $("check").disabled = true;
+    const r = await call("/demo/check");
+    if (!r.ok) { $("check").disabled = false; return failed(1, r); }
+    const took = r.elapsedMs < 1000 ? "in under a second" : `in ${(r.elapsedMs / 1000).toFixed(1)} seconds`;
+    show(1, r.tone, r.headline, [
+      el("p", { className: "speed", textContent: `The plan answered ${took}, while the clinician was still signing.` }),
+      r.detail ? el("p", { className: "detail", textContent: r.detail }) : null,
+      technical(r.technical),
+    ]);
+    if (r.hasForm) { stage(2); return; }
+    show(2, "form-answer", "The plan has no form for this service", [
+      el("p", { className: "detail", textContent: "You can still send a request, to see what the plan answers." }),
+    ]);
+    stage(3);
+  });
+
+  // ---- Step 2: the plan's form, editable.
+
+  function input(q) {
+    const id = `q-${q.linkId}`;
+    const mark = q.required ? el("span", { className: "required", textContent: " (required)" }) : null;
+    let control;
+    if (q.type === "boolean") {
+      const radio = (value, text) => el("label", {},
+        el("input", { type: "radio", name: id, value, checked: q.answer === (value === "yes") && q.answer !== null }), text);
+      return el("div", { className: "question", dataset: { link: q.linkId } },
+        el("fieldset", {}, el("legend", {}, q.text, mark), el("div", { className: "choices" }, radio("yes", "Yes"), radio("no", "No"))));
+    }
+    if (q.type === "choice") {
+      control = el("select", { id }, el("option", { value: "", textContent: "Choose…" }),
+        ...q.options.map(o => el("option", { value: o.code, textContent: o.display, selected: o.code === q.answer })));
+    } else if (q.type === "date") {
+      control = el("input", { id, type: "date", value: q.answer ?? "" });
+    } else if (q.type === "text") {
+      control = el("textarea", { id, value: q.answer ?? "", rows: 2 });
+    } else {
+      control = el("input", { id, type: "text", value: q.answer ?? "" });
+    }
+    return el("div", { className: "question", dataset: { link: q.linkId } }, el("label", { htmlFor: id }, q.text, mark), control);
+  }
+
+  function readAnswers() {
+    const answers = {};
+    for (const q of questions) {
+      const id = `q-${q.linkId}`;
+      if (q.type === "boolean") {
+        const picked = document.querySelector(`input[name="${id}"]:checked`);
+        if (picked) answers[q.linkId] = picked.value === "yes";
+      } else {
+        const value = $(id).value.trim();
+        if (value) answers[q.linkId] = value;
+      }
+    }
+    return answers;
+  }
+
+  $("form").addEventListener("click", async () => {
+    $("form").disabled = true;
+    const r = await call("/demo/form");
+    if (!r.ok) { $("form").disabled = false; return failed(2, r); }
+    questions = r.questions;
+    show(2, "form-answer", r.headline, [
+      r.detail ? el("p", { className: "detail", textContent: r.detail }) : null,
+      el("div", { className: "form-grid" }, ...questions.map(input)),
+      el("p", { className: "attached", textContent: `Attached: ${r.documents.join(", ")}` }),
+      technical(r.technical),
+    ]);
+    stage(3);
+  });
+
+  // ---- Step 3: send what is on screen.
+
+  $("send").addEventListener("click", async () => {
+    $("answer-3").hidden = true;
+    for (const node of document.querySelectorAll(".question")) {
+      node.classList.remove("missing");
+      node.querySelector(".problem")?.remove();
+    }
+    const answers = readAnswers();
+    const missing = questions.filter(q => q.required && !(q.linkId in answers));
+    if (missing.length) {
+      for (const q of missing) {
+        const node = document.querySelector(`.question[data-link="${q.linkId}"]`);
+        node.classList.add("missing");
+        node.append(el("p", { className: "problem", textContent: "Answer this question before sending." }));
+      }
+      show(3, "error", `Answer the ${missing.length === 1 ? "required question" : `${missing.length} required questions`} first`);
+      return;
+    }
+    $("send").disabled = true;
+    for (const control of document.querySelectorAll(".question input, .question select, .question textarea")) control.disabled = true;
+    const r = await call("/demo/send", { answers: questions.length ? answers : null });
+    if (!r.ok) {
+      $("send").disabled = false;
+      for (const control of document.querySelectorAll(".question input, .question select, .question textarea")) control.disabled = false;
+      return failed(3, r);
+    }
+    const queued = r.status === "pended" || r.status === "info";
+    show(3, "yes", "Sent", [
+      el("p", { className: "detail", textContent: queued
+        ? `The plan received request ${r.requestNumber} and put it in its review queue.`
+        : `The plan received request ${r.requestNumber} and answered at once.` }),
+      queued ? el("p", { className: "detail" }, el("a", { href: reviewerPage, target: "_blank", rel: "noopener", textContent: "Open the plan's reviewer page" }), " to approve or deny it.") : null,
+      technical(r.technical),
+    ]);
+    stage(4);
+    decision(r);
+    if (queued) polling = setInterval(checkBack, 4000);
+  });
+
+  // ---- Step 4: the decision.
+
+  async function checkBack() {
+    const r = await call("/demo/status");
+    if (!r.ok) return failed(4, r);
+    decision(r);
+  }
+
+  function decision(r) {
+    const finished = ["approved", "denied", "not-required"].includes(r.status);
+    const tone = { approved: "yes", "not-required": "yes", denied: "no", info: "attention" }[r.status] || "";
+    const extra = [];
+    if (!finished) extra.push(el("p", { className: "speed" }, el("span", { className: "waiting-dot", ariaHidden: "true" }), "Checking with the plan every few seconds"));
+    extra.push(el("p", { className: "detail", textContent: r.detail }));
+    if (r.authorizationNumber) extra.push(el("p", { className: "detail", textContent: `Authorization number: ${r.authorizationNumber}` }));
+    extra.push(technical(r.technical));
+    show(4, tone, r.headline, extra);
+    if (finished) {
+      clearInterval(polling); polling = null;
+      $("step-4").className = "step done";
+    }
+  }
+
+  $("restart").addEventListener("click", async () => {
+    clearStory();
+    await call("/demo/reset");
+  });
+
+  loadServices();
+</script>
+</body>
+</html>

@@ -14,6 +14,15 @@ public enum AuthorizationStatus
     NotRequired,
 }
 
+/// <summary>What kind of review a request gets.</summary>
+public enum ReviewType
+{
+    /// <summary>Approval before the service is given.</summary>
+    PriorAuthorization,
+    /// <summary>Review of an admission or stay that has already started (psychiatric inpatient and PHF, BHIN 22-017).</summary>
+    ConcurrentReview,
+}
+
 /// <summary>Thrown when an action would break a rule of the authorization process.</summary>
 public class DomainRuleException(string message) : Exception(message);
 
@@ -51,13 +60,25 @@ public class AuthorizationRequest
     /// <summary>The FHIR Bundle as the provider first sent it, with document contents removed (they are kept once, in <see cref="Documents"/>).</summary>
     public string SubmittedBundleJson { get; private set; } = "";
     public DateTime ReceivedAtUtc { get; private set; }
+    /// <summary>The kind of review the request gets. Null when the service needs none.</summary>
+    public ReviewType? ReviewType { get; private set; }
     public AuthorizationStatus Status { get; private set; }
     public string? AuthorizationNumber { get; private set; }
     public DateOnly? AuthorizedThrough { get; private set; }
     /// <summary>The denial reason, or what information is missing.</summary>
     public string? Reason { get; private set; }
     public DateTime? DecidedAtUtc { get; private set; }
+    /// <summary>The display name of the person who decided.</summary>
     public string? DecidedBy { get; private set; }
+    /// <summary>The sign-in account of the person who decided, for example COUNTY\jdoe.</summary>
+    public string? DecidedByAccount { get; private set; }
+    /// <summary>For an approval with changes: what was changed from the request.</summary>
+    public string? Modification { get; private set; }
+    /// <summary>For a denial: the code from the plan's list of denial reasons. <see cref="Reason"/> holds the text.</summary>
+    public string? DenialReasonCode { get; private set; }
+    /// <summary>The account of the staff member working the request; null when no one has claimed it.</summary>
+    public string? AssignedTo { get; private set; }
+    public string? AssignedToName { get; private set; }
     /// <summary>When anything about the request last changed. Also the answer's "last updated" time.</summary>
     public DateTime LastChangedAtUtc { get; private set; }
     /// <summary>Goes up on every change. The database refuses a save based on an out-of-date copy, so two people cannot both decide.</summary>
@@ -70,8 +91,10 @@ public class AuthorizationRequest
 
     public bool IsOpen => Status is AuthorizationStatus.Pended or AuthorizationStatus.InformationRequested;
 
+    /// <param name="review">The review the service gets, or null when the service needs none and the request is answered at once.</param>
+    /// <param name="note">Anything the reviewer or the record should know about how the service was read, added to the first history entry.</param>
     public static AuthorizationRequest Receive(
-        RequestDetails details, bool authorizationRequired,
+        RequestDetails details, ReviewType? review, string? note,
         string submittedBundleJson, IReadOnlyCollection<NewDocument> documents, DateTime nowUtc)
     {
         var request = new AuthorizationRequest
@@ -88,11 +111,16 @@ public class AuthorizationRequest
             ServiceName = details.ServiceName,
             SubmittedBundleJson = submittedBundleJson,
             ReceivedAtUtc = nowUtc,
-            Status = authorizationRequired ? AuthorizationStatus.Pended : AuthorizationStatus.NotRequired,
+            ReviewType = review,
+            Status = review is null ? AuthorizationStatus.NotRequired : AuthorizationStatus.Pended,
         };
-        request.Record(nowUtc, details.ProviderName, authorizationRequired
-            ? "Received. Pended for review."
-            : "Received. The service does not require prior authorization.");
+        var received = review switch
+        {
+            Domain.ReviewType.PriorAuthorization => "Received. Pended for review.",
+            Domain.ReviewType.ConcurrentReview => "Received. Pended for concurrent review.",
+            _ => "Received. The service does not require prior authorization.",
+        };
+        request.Record(nowUtc, details.ProviderName, note is null ? received : $"{received} {note}");
         request.Attach(documents, details.ProviderName, nowUtc);
         return request;
     }
@@ -156,52 +184,135 @@ public class AuthorizationRequest
         }
     }
 
-    /// <param name="today">The plan's local date. An approval may not end before it.</param>
-    public void Approve(DateOnly through, string authorizationNumber, string reviewer, DateTime nowUtc, DateOnly today)
+    // ---------- Working the queue ----------
+
+    /// <summary>Takes the request to work on, so no one else decides it meanwhile.</summary>
+    public void Claim(Staff by, DateTime nowUtc)
     {
         EnsureOpen();
-        EnsureReviewer(reviewer);
-        if (through < today)
-            throw new DomainRuleException("An approval must end on or after today.");
+        EnsureWorksQueue(by);
+        if (AssignedTo is not null && AssignedTo != by.Account)
+            throw new DomainRuleException($"{AssignedToName} is working on this request. Ask a coordinator to reassign it.");
+        if (AssignedTo == by.Account) return;
+        Assign(by, by, nowUtc, $"Claimed by {by.DisplayName}.");
+    }
 
+    /// <summary>A coordinator gives the request to someone who works the queue.</summary>
+    public void AssignTo(Staff to, Staff by, DateTime nowUtc)
+    {
+        EnsureOpen();
+        if (!by.Has(StaffRole.Coordinator)) throw new DomainRuleException("Only a coordinator can assign a request to someone else.");
+        if (!to.WorksQueue) throw new DomainRuleException($"{to.DisplayName} does not work the review queue.");
+        if (AssignedTo == to.Account) return;
+        Assign(to, by, nowUtc, $"Assigned to {to.DisplayName}.");
+    }
+
+    /// <summary>Gives the request back to the queue. Its holder or a coordinator may.</summary>
+    public void Release(Staff by, DateTime nowUtc)
+    {
+        EnsureOpen();
+        if (AssignedTo is null) return;
+        if (AssignedTo != by.Account && !by.Has(StaffRole.Coordinator))
+            throw new DomainRuleException($"Only {AssignedToName} or a coordinator can release this request.");
+        Record(nowUtc, by.DisplayName, $"Released by {by.DisplayName}; back in the queue.");
+        AssignedTo = null;
+        AssignedToName = null;
+    }
+
+    // ---------- What someone may do now ----------
+    // Pages ask these to decide which actions to offer. The methods that act enforce the same rules and say why not.
+
+    /// <summary>Someone other than this person has claimed the request.</summary>
+    public bool IsHeldByAnother(Staff staff) => AssignedTo is not null && AssignedTo != staff.Account;
+
+    public bool MayBeClaimedBy(Staff staff) => IsOpen && staff.WorksQueue && AssignedTo is null;
+
+    public bool MayBeAssignedBy(Staff staff) => IsOpen && staff.Has(StaffRole.Coordinator);
+
+    public bool MayBeReleasedBy(Staff staff) => IsOpen && AssignedTo is not null && (AssignedTo == staff.Account || staff.Has(StaffRole.Coordinator));
+
+    /// <summary>May approve, approve with changes, or deny it.</summary>
+    public bool MayBeDecidedBy(Staff staff) => IsOpen && staff.MayDecide(ReviewType) && !IsHeldByAnother(staff);
+
+    public bool MayBeAskedForInformationBy(Staff staff) => IsOpen && staff.WorksQueue && !IsHeldByAnother(staff);
+
+    private void Assign(Staff to, Staff by, DateTime nowUtc, string text)
+    {
+        AssignedTo = to.Account;
+        AssignedToName = to.DisplayName;
+        Record(nowUtc, by.DisplayName, text);
+    }
+
+    // ---------- Decisions ----------
+
+    /// <param name="today">The plan's local date. An approval may not end before it.</param>
+    public void Approve(DateOnly through, string authorizationNumber, Staff by, DateTime nowUtc, DateOnly today)
+    {
+        EnsureMayDecide(by);
+        EnsureEndDate(through, today);
         Status = AuthorizationStatus.Approved;
         AuthorizedThrough = through;
         AuthorizationNumber = authorizationNumber;
         Reason = null;
-        Decide(reviewer, nowUtc, $"Approved through {through:yyyy-MM-dd} as {authorizationNumber}.");
+        Modification = null;
+        Decide(by, nowUtc, $"Approved through {through:yyyy-MM-dd} as {authorizationNumber}.");
     }
 
-    public void Deny(string reason, string reviewer, DateTime nowUtc)
+    /// <summary>Approves less than was asked for (fewer hours, a shorter period). An adverse decision, so clinicians only.</summary>
+    public void ApproveWithChanges(DateOnly through, string change, string authorizationNumber, Staff by, DateTime nowUtc, DateOnly today)
     {
-        EnsureOpen();
-        EnsureReviewer(reviewer);
+        EnsureMayDecide(by);
+        if (string.IsNullOrWhiteSpace(change))
+            throw new DomainRuleException("An approval with changes must say what was changed.");
+        EnsureEndDate(through, today);
+        Status = AuthorizationStatus.Approved;
+        AuthorizedThrough = through;
+        AuthorizationNumber = authorizationNumber;
+        Reason = null;
+        Modification = change.Trim();
+        Decide(by, nowUtc, $"Approved with changes through {through:yyyy-MM-dd} as {authorizationNumber}: {Modification}");
+    }
+
+    /// <param name="reasonCode">A code from the plan's list of denial reasons.</param>
+    /// <param name="reason">The specific reason, in words the provider and member can act on.</param>
+    public void Deny(string reasonCode, string reason, Staff by, DateTime nowUtc)
+    {
+        EnsureMayDecide(by);
+        if (string.IsNullOrWhiteSpace(reasonCode))
+            throw new DomainRuleException("A denial must have a reason from the plan's list.");
         if (string.IsNullOrWhiteSpace(reason))
             throw new DomainRuleException("A denial must state a specific reason.");
 
         Status = AuthorizationStatus.Denied;
+        DenialReasonCode = reasonCode.Trim();
         Reason = reason.Trim();
         AuthorizationNumber = null;
         AuthorizedThrough = null;
-        Decide(reviewer, nowUtc, $"Denied: {Reason}");
+        Modification = null;
+        Decide(by, nowUtc, $"Denied ({DenialReasonCode}): {Reason}");
     }
 
-    public void RequestInformation(string missing, string reviewer, DateTime nowUtc)
+    public void RequestInformation(string missing, Staff by, DateTime nowUtc)
     {
         EnsureOpen();
-        EnsureReviewer(reviewer);
+        EnsureWorksQueue(by);
+        EnsureNotHeldByAnother(by);
         if (string.IsNullOrWhiteSpace(missing))
             throw new DomainRuleException("An information request must say what is missing.");
 
         Status = AuthorizationStatus.InformationRequested;
         Reason = missing.Trim();
-        Record(nowUtc, reviewer, $"More information requested: {Reason}");
+        Record(nowUtc, by.DisplayName, $"More information requested: {Reason}");
     }
 
-    private void Decide(string reviewer, DateTime nowUtc, string text)
+    private void Decide(Staff by, DateTime nowUtc, string text)
     {
-        DecidedBy = reviewer.Trim();
+        DecidedBy = by.DisplayName;
+        DecidedByAccount = by.Account;
         DecidedAtUtc = nowUtc;
-        Record(nowUtc, reviewer, text);
+        AssignedTo = null;
+        AssignedToName = null;
+        Record(nowUtc, by.DisplayName, text);
     }
 
     private void EnsureOpen()
@@ -209,9 +320,30 @@ public class AuthorizationRequest
         if (!IsOpen) throw new DomainRuleException($"This request is already {Status} and cannot be changed.");
     }
 
-    private static void EnsureReviewer(string reviewer)
+    private static void EnsureWorksQueue(Staff by)
     {
-        if (string.IsNullOrWhiteSpace(reviewer)) throw new DomainRuleException("The reviewer must be identified.");
+        if (!by.WorksQueue) throw new DomainRuleException("Only coordinators, licensed clinicians and physicians work the review queue.");
+    }
+
+    private void EnsureMayDecide(Staff by)
+    {
+        EnsureOpen();
+        if (!by.MayDecide(ReviewType))
+            throw new DomainRuleException(ReviewType == Domain.ReviewType.ConcurrentReview
+                ? "Only a physician can decide a concurrent review of an inpatient or PHF stay."
+                : "Only a licensed clinician or a physician can approve or deny a request.");
+        EnsureNotHeldByAnother(by);
+    }
+
+    private void EnsureNotHeldByAnother(Staff by)
+    {
+        if (IsHeldByAnother(by))
+            throw new DomainRuleException($"{AssignedToName} is working on this request. Ask them or a coordinator to release it first.");
+    }
+
+    private static void EnsureEndDate(DateOnly through, DateOnly today)
+    {
+        if (through < today) throw new DomainRuleException("An approval must end on or after today.");
     }
 
     private void Record(DateTime nowUtc, string actor, string text)

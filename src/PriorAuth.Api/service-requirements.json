@@ -1,57 +1,527 @@
 ﻿{
-  "_comment": "PLACEHOLDER DATA. The real list, documentation rules and questions must be supplied and signed off by the plan's utilization management staff (GitHub issue #1).",
+  "_comment": [
+    "The plan's list of services, built from the DHCS notices BHIN 26-030 (outpatient SMHS), BHIN 22-017 (psychiatric inpatient and PHF) and BHIN 24-001 (DMC-ODS).",
+    "Rule: PriorAuthorization, ConcurrentReview or NoPriorAuthorization. Services not on the list need no prior authorization.",
+    "CodeConfirmed false: the code or modifier has not been confirmed against the current DHCS billing manual. The plan's billing staff must confirm each one.",
+    "Questionnaires with Status draft have not been signed off by the plan's clinical lead. Draft questions written from the DHCS notices. They must be reviewed and signed off by the plan's clinical lead before real use.",
+    "Left out on purpose: ASAM 3.7 and 4.0 (covering them is optional for DMC-ODS plans; add them once the plan confirms it covers them and the code), and STRTP (a facility type, not a service DHCS lists)."
+  ],
+  "Questionnaires": [
+    {
+      "Id": "dtr-mhp-inpatient",
+      "Title": "Acute psychiatric inpatient admission (concurrent review)",
+      "Status": "draft",
+      "Documentation": [
+        "Admission orders",
+        "Initial plan of care",
+        "Face sheet"
+      ],
+      "Questions": [
+        {
+          "LinkId": "admission-date",
+          "Text": "Date of admission",
+          "Type": "date",
+          "Required": true
+        },
+        {
+          "LinkId": "admission-status",
+          "Text": "Admission status",
+          "Type": "choice",
+          "Required": true,
+          "Options": [
+            "Voluntary",
+            "Involuntary hold"
+          ]
+        },
+        {
+          "LinkId": "diagnosis",
+          "Text": "Admitting diagnosis",
+          "Type": "text",
+          "Required": true
+        },
+        {
+          "LinkId": "medical-necessity",
+          "Text": "How the member meets the criteria for inpatient care, including why care cannot be given safely at a lower level",
+          "Type": "text",
+          "Required": true
+        },
+        {
+          "LinkId": "days-requested",
+          "Text": "Days requested for this review period",
+          "Type": "string",
+          "Required": true
+        },
+        {
+          "LinkId": "discharge-plan",
+          "Text": "Discharge plan so far",
+          "Type": "text",
+          "Required": false
+        }
+      ]
+    },
+    {
+      "Id": "dtr-mhp-phf",
+      "Title": "Psychiatric health facility admission (concurrent review)",
+      "Status": "draft",
+      "Documentation": [
+        "Admission orders",
+        "Initial plan of care",
+        "Face sheet"
+      ],
+      "Questions": [
+        {
+          "LinkId": "admission-date",
+          "Text": "Date of admission",
+          "Type": "date",
+          "Required": true
+        },
+        {
+          "LinkId": "admission-status",
+          "Text": "Admission status",
+          "Type": "choice",
+          "Required": true,
+          "Options": [
+            "Voluntary",
+            "Involuntary hold"
+          ]
+        },
+        {
+          "LinkId": "diagnosis",
+          "Text": "Admitting diagnosis",
+          "Type": "text",
+          "Required": true
+        },
+        {
+          "LinkId": "medical-necessity",
+          "Text": "How the member meets the criteria for PHF care, including why care cannot be given safely at a lower level",
+          "Type": "text",
+          "Required": true
+        },
+        {
+          "LinkId": "days-requested",
+          "Text": "Days requested for this review period",
+          "Type": "string",
+          "Required": true
+        },
+        {
+          "LinkId": "discharge-plan",
+          "Text": "Discharge plan so far",
+          "Type": "text",
+          "Required": false
+        }
+      ]
+    },
+    {
+      "Id": "dtr-mhp-youth",
+      "Title": "Therapeutic behavioral services or therapeutic foster care",
+      "Status": "draft",
+      "Documentation": [
+        "Current assessment",
+        "Client plan or problem list showing the need",
+        "Target behaviours and transition plan"
+      ],
+      "Questions": [
+        {
+          "LinkId": "under-21",
+          "Text": "Is the member under 21 (EPSDT)?",
+          "Type": "boolean",
+          "Required": true
+        },
+        {
+          "LinkId": "assessment-date",
+          "Text": "Date of the most recent assessment",
+          "Type": "date",
+          "Required": true
+        },
+        {
+          "LinkId": "diagnosis",
+          "Text": "Diagnosis",
+          "Type": "text",
+          "Required": true
+        },
+        {
+          "LinkId": "target-behaviours",
+          "Text": "Target behaviours or symptoms the service will address",
+          "Type": "text",
+          "Required": true
+        },
+        {
+          "LinkId": "placement-risk",
+          "Text": "Without this service, is the member at risk of a higher level of care, or unable to move to a lower one?",
+          "Type": "boolean",
+          "Required": true
+        },
+        {
+          "LinkId": "amount-requested",
+          "Text": "Amount requested (TBS: hours per week; TFC: placement start date and expected length)",
+          "Type": "text",
+          "Required": true
+        },
+        {
+          "LinkId": "transition-plan",
+          "Text": "Transition plan",
+          "Type": "text",
+          "Required": false
+        }
+      ]
+    },
+    {
+      "Id": "dtr-mhp-day-treatment",
+      "Title": "Day treatment intensive or day rehabilitation",
+      "Status": "draft",
+      "Documentation": [
+        "Current assessment",
+        "Client plan or problem list",
+        "Program schedule"
+      ],
+      "Questions": [
+        {
+          "LinkId": "assessment-date",
+          "Text": "Date of the most recent assessment",
+          "Type": "date",
+          "Required": true
+        },
+        {
+          "LinkId": "diagnosis",
+          "Text": "Diagnosis",
+          "Type": "text",
+          "Required": true
+        },
+        {
+          "LinkId": "impairment",
+          "Text": "Functional impairment the program will address",
+          "Type": "text",
+          "Required": true
+        },
+        {
+          "LinkId": "lower-level",
+          "Text": "Why a less intensive service would not meet the member's needs",
+          "Type": "text",
+          "Required": true
+        },
+        {
+          "LinkId": "schedule",
+          "Text": "Program schedule",
+          "Type": "choice",
+          "Required": true,
+          "Options": [
+            "Half day",
+            "Full day"
+          ]
+        },
+        {
+          "LinkId": "days-per-week",
+          "Text": "Days per week requested",
+          "Type": "string",
+          "Required": true
+        }
+      ]
+    },
+    {
+      "Id": "dtr-mhp-act",
+      "Title": "Assertive community treatment or forensic ACT",
+      "Status": "draft",
+      "Documentation": [
+        "Current assessment",
+        "Client plan or problem list"
+      ],
+      "Questions": [
+        {
+          "LinkId": "assessment-date",
+          "Text": "Date of the most recent assessment",
+          "Type": "date",
+          "Required": true
+        },
+        {
+          "LinkId": "diagnosis",
+          "Text": "Diagnosis",
+          "Type": "text",
+          "Required": true
+        },
+        {
+          "LinkId": "history",
+          "Text": "Psychiatric hospitalizations, crisis episodes or incarcerations in the past 12 months",
+          "Type": "text",
+          "Required": true
+        },
+        {
+          "LinkId": "forensic",
+          "Text": "Is forensic ACT (FACT) requested because of justice involvement?",
+          "Type": "boolean",
+          "Required": true
+        },
+        {
+          "LinkId": "why-act",
+          "Text": "Why the member needs ACT rather than standard outpatient services",
+          "Type": "text",
+          "Required": true
+        }
+      ]
+    },
+    {
+      "Id": "dtr-dmcods-residential",
+      "Title": "DMC-ODS residential treatment (ASAM levels 3.1, 3.3, 3.5)",
+      "Status": "draft",
+      "Documentation": [
+        "ASAM assessment or level of care screening",
+        "DSM substance use disorder diagnosis"
+      ],
+      "Questions": [
+        {
+          "LinkId": "asam-level",
+          "Text": "ASAM level of care requested",
+          "Type": "choice",
+          "Required": true,
+          "Options": [
+            "3.1",
+            "3.3",
+            "3.5"
+          ]
+        },
+        {
+          "LinkId": "diagnosis",
+          "Text": "DSM substance use disorder diagnosis",
+          "Type": "text",
+          "Required": true
+        },
+        {
+          "LinkId": "assessment-date",
+          "Text": "Date of the ASAM assessment or screening",
+          "Type": "date",
+          "Required": true
+        },
+        {
+          "LinkId": "justification",
+          "Text": "Why this level of care is needed",
+          "Type": "text",
+          "Required": true
+        },
+        {
+          "LinkId": "dimension-1",
+          "Text": "Dimension 1: acute intoxication and withdrawal potential",
+          "Type": "text",
+          "Required": false
+        },
+        {
+          "LinkId": "dimension-2",
+          "Text": "Dimension 2: biomedical conditions and complications",
+          "Type": "text",
+          "Required": false
+        },
+        {
+          "LinkId": "dimension-3",
+          "Text": "Dimension 3: emotional, behavioral or cognitive conditions",
+          "Type": "text",
+          "Required": false
+        },
+        {
+          "LinkId": "dimension-4",
+          "Text": "Dimension 4: readiness to change",
+          "Type": "text",
+          "Required": false
+        },
+        {
+          "LinkId": "dimension-5",
+          "Text": "Dimension 5: relapse, continued use or continued problem potential",
+          "Type": "text",
+          "Required": false
+        },
+        {
+          "LinkId": "dimension-6",
+          "Text": "Dimension 6: recovery and living environment",
+          "Type": "text",
+          "Required": false
+        },
+        {
+          "LinkId": "start-date",
+          "Text": "Requested start date",
+          "Type": "date",
+          "Required": true
+        },
+        {
+          "LinkId": "perinatal",
+          "Text": "Is the member pregnant or postpartum (perinatal services)?",
+          "Type": "boolean",
+          "Required": false
+        }
+      ]
+    }
+  ],
   "ServiceRequirements": [
     {
-      "System": "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets",
-      "Code": "H2019",
-      "Name": "Therapeutic Behavioral Services",
+      "System": "https://www.nubc.org/CodeSystem/RevenueCodes",
+      "Code": "0100",
+      "Name": "Acute psychiatric inpatient hospital services",
       "Program": "SMHS",
-      "Documentation": [ "Current assessment", "Client plan showing TBS need", "Target behaviours and transition plan" ],
-      "Questions": [
-        { "LinkId": "assessment-date", "Text": "Date of the most recent assessment", "Type": "date", "Required": true },
-        { "LinkId": "target-behaviours", "Text": "Target behaviours TBS will address", "Type": "text", "Required": true },
-        { "LinkId": "placement-risk", "Text": "Is the member at risk of a higher level of placement without TBS?", "Type": "boolean", "Required": true },
-        { "LinkId": "hours-per-week", "Text": "Requested hours per week", "Type": "choice", "Required": true, "Options": [ "Up to 10", "11 to 20", "More than 20" ] },
-        { "LinkId": "transition-plan", "Text": "Transition plan", "Type": "text", "Required": false }
-      ]
+      "Rule": "ConcurrentReview",
+      "Questionnaire": "dtr-mhp-inpatient",
+      "CodeConfirmed": false,
+      "Source": "BHIN 22-017; SMHS Billing Manual 5.12",
+      "Note": "Concurrent review, not prior authorization. No prior authorization for emergency care. Inpatient claims carry a revenue code; confirm which code admission notices will carry."
     },
     {
       "System": "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets",
-      "Code": "H2012",
-      "Name": "Day Treatment Intensive / Day Rehabilitation",
+      "Code": "H2013",
+      "Name": "Psychiatric health facility (PHF)",
       "Program": "SMHS",
-      "Documentation": [ "Current assessment", "Proposed schedule and hours per day", "Reason a lower level of care is insufficient" ],
-      "Questions": [
-        { "LinkId": "assessment-date", "Text": "Date of the most recent assessment", "Type": "date", "Required": true },
-        { "LinkId": "program-type", "Text": "Program requested", "Type": "choice", "Required": true, "Options": [ "Day Treatment Intensive", "Day Rehabilitation" ] },
-        { "LinkId": "hours-per-day", "Text": "Hours per day", "Type": "choice", "Required": true, "Options": [ "Half day", "Full day" ] },
-        { "LinkId": "lower-level-insufficient", "Text": "Why a lower level of care is insufficient", "Type": "text", "Required": true }
-      ]
+      "Rule": "ConcurrentReview",
+      "Questionnaire": "dtr-mhp-phf",
+      "CodeConfirmed": false,
+      "Source": "BHIN 22-017; MHSUDS IN 15-030 Enclosure 1 (2015)",
+      "Note": "Concurrent review, not prior authorization. Code taken from a 2015 notice; confirm against the current billing manual."
     },
     {
       "System": "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets",
-      "Code": "S5145",
-      "Name": "Therapeutic Foster Care",
+      "Code": "H0018",
+      "Name": "Crisis residential treatment services",
       "Program": "SMHS",
-      "Documentation": [ "Child and Family Team recommendation", "Current assessment" ],
-      "Questions": [
-        { "LinkId": "cft-recommended", "Text": "Has the Child and Family Team recommended Therapeutic Foster Care?", "Type": "boolean", "Required": true },
-        { "LinkId": "cft-date", "Text": "Date of the Child and Family Team meeting", "Type": "date", "Required": true },
-        { "LinkId": "needs-summary", "Text": "Summary of the child's needs", "Type": "text", "Required": true }
-      ]
+      "Rule": "NoPriorAuthorization",
+      "CodeConfirmed": false,
+      "Source": "BHIN 26-030 (referral or concurrent review only); MHSUDS IN 15-030 Enclosure 1 (2015)",
+      "Note": "MHPs may not require prior authorization. Code taken from a 2015 notice; confirm."
     },
     {
       "System": "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets",
       "Code": "H0019",
-      "Name": "Residential Treatment",
+      "Name": "Adult residential treatment services",
+      "Program": "SMHS",
+      "Rule": "NoPriorAuthorization",
+      "CodeConfirmed": false,
+      "Source": "BHIN 26-030 (referral or concurrent review only); MHSUDS IN 15-030 Enclosure 1 (2015)",
+      "Note": "MHPs may not require prior authorization. Shares H0019 with the DMC-ODS residential levels, which are told apart by modifiers U1, U2 and U3; confirm the modifiers used for adult residential."
+    },
+    {
+      "System": "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets",
+      "Code": "S5145",
+      "Modifiers": [
+        "HE"
+      ],
+      "Name": "Therapeutic foster care (TFC)",
+      "Program": "SMHS",
+      "Rule": "PriorAuthorization",
+      "Questionnaire": "dtr-mhp-youth",
+      "CodeConfirmed": true,
+      "Source": "BHIN 26-030 p.8; SMHS Billing Manual 5.29",
+      "Note": "EPSDT only: members under 21."
+    },
+    {
+      "System": "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets",
+      "Code": "H2019",
+      "Name": "Therapeutic behavioral services (TBS)",
+      "Program": "SMHS",
+      "Rule": "PriorAuthorization",
+      "Questionnaire": "dtr-mhp-youth",
+      "CodeConfirmed": true,
+      "Source": "BHIN 26-030 p.8; SMHS Billing Manual",
+      "Note": "EPSDT only: members under 21."
+    },
+    {
+      "System": "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets",
+      "Code": "H2012",
+      "Modifiers": [
+        "TG"
+      ],
+      "Name": "Day treatment intensive",
+      "Program": "SMHS",
+      "Rule": "PriorAuthorization",
+      "Questionnaire": "dtr-mhp-day-treatment",
+      "CodeConfirmed": false,
+      "Source": "BHIN 26-030 p.8; county billing guide (Los Angeles DMH, 2021)",
+      "Note": "Code and modifier from a county guide written before payment reform; confirm against the DHCS billing manual."
+    },
+    {
+      "System": "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets",
+      "Code": "H2012",
+      "Name": "Day rehabilitation",
+      "Program": "SMHS",
+      "Rule": "PriorAuthorization",
+      "Questionnaire": "dtr-mhp-day-treatment",
+      "CodeConfirmed": false,
+      "Source": "BHIN 26-030 p.8; county billing guide (Los Angeles DMH, 2021)",
+      "Note": "Code from a county guide written before payment reform; confirm against the DHCS billing manual."
+    },
+    {
+      "System": "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets",
+      "Code": "H0040",
+      "Name": "Assertive community treatment (ACT) and forensic ACT (FACT)",
+      "Program": "SMHS",
+      "Rule": "PriorAuthorization",
+      "Questionnaire": "dtr-mhp-act",
+      "CodeConfirmed": false,
+      "Source": "BHIN 26-030 p.8",
+      "Note": "The rule is confirmed; the code was not found in a DHCS source. Confirm."
+    },
+    {
+      "System": "http://www.ama-assn.org/go/cpt",
+      "Code": "90867",
+      "Name": "Repetitive transcranial magnetic stimulation (rTMS)",
+      "Program": "SMHS",
+      "Rule": "NoPriorAuthorization",
+      "CodeConfirmed": true,
+      "Source": "BHIN 26-030 pp.7-8 (MHPs may not apply prior authorization to SMHS not listed); SMHS Billing Manual code table",
+      "Note": "Not on the DHCS list of services that may be prior-authorized, so the plan may not require it. Inferred; confirm."
+    },
+    {
+      "System": "http://www.ama-assn.org/go/cpt",
+      "Code": "90870",
+      "Name": "Electroconvulsive therapy (ECT)",
+      "Program": "SMHS",
+      "Rule": "NoPriorAuthorization",
+      "CodeConfirmed": true,
+      "Source": "BHIN 26-030 pp.7-8 (MHPs may not apply prior authorization to SMHS not listed); SMHS Billing Manual code table",
+      "Note": "Not on the DHCS list of services that may be prior-authorized, so the plan may not require it. Inferred; confirm."
+    },
+    {
+      "System": "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets",
+      "Code": "H0019",
+      "Modifiers": [
+        "U1"
+      ],
+      "Name": "ASAM level 3.1 clinically managed low-intensity residential treatment",
       "Program": "DMC-ODS",
-      "Documentation": [ "ASAM level of care assessment", "Diagnosis", "Requested length of stay" ],
-      "Questions": [
-        { "LinkId": "asam-level", "Text": "ASAM level of care indicated", "Type": "choice", "Required": true, "Options": [ "3.1", "3.3", "3.5" ] },
-        { "LinkId": "asam-date", "Text": "Date of the ASAM assessment", "Type": "date", "Required": true },
-        { "LinkId": "diagnosis", "Text": "Primary diagnosis", "Type": "string", "Required": true },
-        { "LinkId": "length-of-stay", "Text": "Requested length of stay in days", "Type": "string", "Required": true }
-      ]
+      "Rule": "PriorAuthorization",
+      "Questionnaire": "dtr-dmcods-residential",
+      "CodeConfirmed": false,
+      "Source": "BHIN 24-001 p.9 and p.29; Orange County DMC-ODS billing guide (2026), citing DHCS DMC-ODS Billing Manual v4.0",
+      "Note": "Decision within 24 hours of the request. Code and modifier from a county guide; confirm against the DHCS billing manual."
+    },
+    {
+      "System": "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets",
+      "Code": "H0019",
+      "Modifiers": [
+        "U2"
+      ],
+      "Name": "ASAM level 3.3 clinically managed population-specific high-intensity residential treatment",
+      "Program": "DMC-ODS",
+      "Rule": "PriorAuthorization",
+      "Questionnaire": "dtr-dmcods-residential",
+      "CodeConfirmed": false,
+      "Source": "BHIN 24-001 p.9 and p.29; Orange County DMC-ODS billing guide (2026), citing DHCS DMC-ODS Billing Manual v4.0",
+      "Note": "Decision within 24 hours of the request. Code and modifier from a county guide; confirm against the DHCS billing manual."
+    },
+    {
+      "System": "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets",
+      "Code": "H0019",
+      "Modifiers": [
+        "U3"
+      ],
+      "Name": "ASAM level 3.5 clinically managed high-intensity residential treatment",
+      "Program": "DMC-ODS",
+      "Rule": "PriorAuthorization",
+      "Questionnaire": "dtr-dmcods-residential",
+      "CodeConfirmed": false,
+      "Source": "BHIN 24-001 p.9 and p.29; Orange County DMC-ODS billing guide (2026), citing DHCS DMC-ODS Billing Manual v4.0",
+      "Note": "Decision within 24 hours of the request. Code and modifier from a county guide; confirm against the DHCS billing manual."
+    },
+    {
+      "System": "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets",
+      "Code": "H0012",
+      "Name": "ASAM level 3.2 residential withdrawal management",
+      "Program": "DMC-ODS",
+      "Rule": "NoPriorAuthorization",
+      "CodeConfirmed": false,
+      "Source": "BHIN 24-001 p.30; Orange County DMC-ODS billing guide (2026)",
+      "Note": "Plans may not impose prior authorization on withdrawal management."
     }
   ]
 }

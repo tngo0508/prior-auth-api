@@ -16,4 +16,7 @@ public class PlanClock(TimeProvider time, IConfiguration config)
     /// <summary>The plan's local date of a UTC instant.</summary>
     public DateOnly LocalDate(DateTime utc) =>
         DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), _zone));
+
+    /// <summary>A UTC instant as the plan's local clock time, for showing to staff.</summary>
+    public DateTime LocalTime(DateTime utc) => TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), _zone);
 }

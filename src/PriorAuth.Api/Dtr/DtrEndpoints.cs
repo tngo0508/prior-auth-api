@@ -22,10 +22,10 @@ public static class DtrEndpoints
     {
         app.MapGet("/fhir/Questionnaire/{id}", (string id, HttpRequest http, FhirJson fhir, ServiceRequirementCatalog catalog, IConfiguration config) =>
         {
-            var requirement = catalog.FindByQuestionnaireId(id);
-            return requirement is null
+            var questionnaire = catalog.FindQuestionnaire(id);
+            return questionnaire is null
                 ? fhir.Problem($"Questionnaire/{id} was not found.", StatusCodes.Status404NotFound)
-                : fhir.Result(QuestionnaireBuilder.Build(requirement, PublicUrl.Base(http, config)));
+                : fhir.Result(QuestionnaireBuilder.Build(questionnaire, PublicUrl.Base(http, config)));
         }).RequireAuthorization(Scopes.ReadQuestionnaires);
 
         // DTR $questionnaire-package: name the questionnaires you want, or send the orders and let the plan choose.
@@ -56,7 +56,7 @@ public static class DtrEndpoints
                 Parameter = request.Packages.Select(p => new Parameters.ParameterComponent
                 {
                     Name = "PackageBundle",
-                    Resource = QuestionnaireBuilder.Package(p.Requirement, baseUrl,
+                    Resource = QuestionnaireBuilder.Package(p.Questionnaire, baseUrl,
                         new DraftContext(request.SubjectFor(p), request.CoverageReferencesFor(p), p.OrderReferences, authored)),
                 }).ToList(),
             };

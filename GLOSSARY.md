@@ -29,8 +29,16 @@ A Provider System sending an Authorization Request again under the same Request 
 _Avoid_: Resubmission, duplicate, update
 
 **Reviewer**:
-A member of the plan's clinical staff who decides an Authorization Request. Decisions are always made by a Reviewer, never automatically.
+A member of the plan's clinical staff who decides an Authorization Request: a Licensed Clinician, or a Physician. Only a Physician decides a Concurrent Review. Decisions are always made by a Reviewer, never automatically, and are recorded against the Reviewer's sign-in account.
 _Avoid_: Adjudicator, approver
+
+**Staff Role**:
+What a member of the plan's staff may do in the portal, given by membership of an Active Directory group: Coordinator (works the queue, assigns, asks for information, cannot decide), Licensed Clinician, Physician, and Admin (registers Provider Systems, does not see the queue). One person may hold several.
+_Avoid_: Permission, user type
+
+**Claim (of a request)**:
+A Reviewer or Coordinator taking an Authorization Request to work on. While it is claimed, no one else may decide it; the holder or a Coordinator releases it, and a Decision releases it. A Coordinator Assigns a request by claiming it for someone else.
+_Avoid_: Lock, checkout, pick up. Not the FHIR `Claim` resource, which is how the request arrives.
 
 **Pended**:
 The state of an Authorization Request that has been received and is waiting for a Reviewer.
@@ -41,12 +49,24 @@ A Reviewer's statement of what is missing from an Authorization Request. The req
 _Avoid_: RFI, pend for info
 
 **Decision**:
-A Reviewer's approval or denial of an Authorization Request. An approval carries an end date; a denial carries a specific reason.
+A Reviewer's approval, approval with changes, or denial of an Authorization Request. An approval carries an end date; an approval with changes also says what was changed from the request (fewer units, a shorter period); a denial carries a reason from the plan's list and a specific reason in words.
 _Avoid_: Determination, adjudication, outcome
 
 **Service Requirement**:
-A covered service that needs authorization, identified by a code and its code system (HCPCS or CPT), together with the documentation and questions the plan requires for it. Drugs are never Service Requirements.
+An entry on the plan's service list: a service identified by its code, code system (HCPCS, CPT or NUBC revenue code) and any billing modifiers, with the Review Rule that applies to it and, when it is reviewed, the questionnaire that documents a request. Drugs are never Service Requirements.
 _Avoid_: Rule, policy, coverage rule
+
+**Review Rule**:
+What the plan does with a request for a Service Requirement: prior authorization (approval before the service), concurrent review (the stay is reviewed after admission), or no prior authorization (the plan may not require it). Set by the DHCS notices, not by the plan alone.
+_Avoid_: Policy, coverage rule
+
+**Review Type**:
+The kind of review an Authorization Request gets: prior authorization or concurrent review. Recorded on the request when it is received, from its service's Review Rule; empty when no review is needed. A request whose service the list cannot settle is pended as prior authorization for a person to check.
+_Avoid_: Request type, queue type
+
+**Concurrent Review**:
+Review of a psychiatric inpatient or PHF stay that has already started. The facility notifies the plan within 24 hours of admission; there is no approval beforehand (BHIN 22-017).
+_Avoid_: Retro review, notification
 
 **Plan Date**:
 The calendar date in the Behavioral Health Plan's time zone. "Today" for approvals, authorization numbers and coverage answers is always the Plan Date, never the UTC date.

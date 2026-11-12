@@ -10,16 +10,17 @@ namespace PriorAuth.Api.Tests;
 
 public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
 {
-    private readonly HttpClient _anonymous = factory.CreateClient();
+    // Signed in as a plan admin, for registering provider systems.
+    private readonly HttpClient _plan = factory.CreateClient();
 
     // ---------- Getting a token ----------
 
     [Fact]
     public async Task A_registered_client_with_a_valid_assertion_gets_a_short_lived_token()
     {
-        var provider = await TestProvider.RegisterAsync(_anonymous);
+        var provider = await TestProvider.RegisterAsync(_plan);
 
-        var response = await TestProvider.RequestToken(_anonymous, provider.Assertion());
+        var response = await TestProvider.RequestToken(_plan, provider.Assertion());
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -31,10 +32,10 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task An_assertion_signed_with_someone_elses_key_is_refused()
     {
-        var provider = await TestProvider.RegisterAsync(_anonymous);
+        var provider = await TestProvider.RegisterAsync(_plan);
         using var attackersKey = RSA.Create(2048);
 
-        var response = await TestProvider.RequestToken(_anonymous, provider.Assertion(signWith: attackersKey));
+        var response = await TestProvider.RequestToken(_plan, provider.Assertion(signWith: attackersKey));
 
         await AssertRefused(response, "invalid_client");
     }
@@ -42,9 +43,9 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task An_assertion_from_an_unregistered_client_is_refused()
     {
-        var provider = await TestProvider.RegisterAsync(_anonymous);
+        var provider = await TestProvider.RegisterAsync(_plan);
 
-        var response = await TestProvider.RequestToken(_anonymous, provider.Assertion(clientId: "not-a-registered-client"));
+        var response = await TestProvider.RequestToken(_plan, provider.Assertion(clientId: "not-a-registered-client"));
 
         await AssertRefused(response, "invalid_client");
     }
@@ -52,9 +53,9 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task An_assertion_addressed_to_a_different_server_is_refused()
     {
-        var provider = await TestProvider.RegisterAsync(_anonymous);
+        var provider = await TestProvider.RegisterAsync(_plan);
 
-        var response = await TestProvider.RequestToken(_anonymous, provider.Assertion(audience: "https://some-other-payer.example/auth/token"));
+        var response = await TestProvider.RequestToken(_plan, provider.Assertion(audience: "https://some-other-payer.example/auth/token"));
 
         await AssertRefused(response, "invalid_client");
     }
@@ -62,9 +63,9 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task An_expired_assertion_is_refused()
     {
-        var provider = await TestProvider.RegisterAsync(_anonymous);
+        var provider = await TestProvider.RegisterAsync(_plan);
 
-        var response = await TestProvider.RequestToken(_anonymous, provider.Assertion(expiresIn: TimeSpan.FromMinutes(-10)));
+        var response = await TestProvider.RequestToken(_plan, provider.Assertion(expiresIn: TimeSpan.FromMinutes(-10)));
 
         await AssertRefused(response, "invalid_client");
     }
@@ -72,9 +73,9 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task An_assertion_that_lives_longer_than_five_minutes_is_refused()
     {
-        var provider = await TestProvider.RegisterAsync(_anonymous);
+        var provider = await TestProvider.RegisterAsync(_plan);
 
-        var response = await TestProvider.RequestToken(_anonymous, provider.Assertion(expiresIn: TimeSpan.FromHours(1)));
+        var response = await TestProvider.RequestToken(_plan, provider.Assertion(expiresIn: TimeSpan.FromHours(1)));
 
         await AssertRefused(response, "invalid_client");
     }
@@ -82,11 +83,11 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task An_assertion_cannot_be_used_twice()
     {
-        var provider = await TestProvider.RegisterAsync(_anonymous);
+        var provider = await TestProvider.RegisterAsync(_plan);
         var assertion = provider.Assertion();
 
-        var first = await TestProvider.RequestToken(_anonymous, assertion);
-        var replay = await TestProvider.RequestToken(_anonymous, assertion);
+        var first = await TestProvider.RequestToken(_plan, assertion);
+        var replay = await TestProvider.RequestToken(_plan, assertion);
 
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
         await AssertRefused(replay, "invalid_client");
@@ -95,10 +96,10 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task A_deactivated_client_cannot_get_a_token()
     {
-        var provider = await TestProvider.RegisterAsync(_anonymous);
-        await _anonymous.PostAsync($"/internal/clients/{provider.ClientId}/deactivate", null);
+        var provider = await TestProvider.RegisterAsync(_plan);
+        await _plan.PostAsync($"/internal/clients/{provider.ClientId}/deactivate", null);
 
-        var response = await TestProvider.RequestToken(_anonymous, provider.Assertion());
+        var response = await TestProvider.RequestToken(_plan, provider.Assertion());
 
         await AssertRefused(response, "invalid_client");
     }
@@ -106,9 +107,9 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task A_request_for_no_supported_scope_is_refused()
     {
-        var provider = await TestProvider.RegisterAsync(_anonymous);
+        var provider = await TestProvider.RegisterAsync(_plan);
 
-        var response = await TestProvider.RequestToken(_anonymous, provider.Assertion(), scope: "system/Patient.read");
+        var response = await TestProvider.RequestToken(_plan, provider.Assertion(), scope: "system/Patient.read");
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal("invalid_scope", (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
@@ -121,7 +122,7 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [InlineData("")]
     public async Task A_malformed_assertion_is_refused_as_invalid_client(string assertion)
     {
-        var response = await TestProvider.RequestToken(_anonymous, assertion);
+        var response = await TestProvider.RequestToken(_plan, assertion);
 
         await AssertRefused(response, "invalid_client");
     }
@@ -129,9 +130,9 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task An_ES384_client_can_sign_in()
     {
-        var client = await SigningClient.EcP384().RegisterAsync(_anonymous);
+        var client = await SigningClient.EcP384().RegisterAsync(_plan);
 
-        var response = await TestProvider.RequestToken(_anonymous, client.Assertion());
+        var response = await TestProvider.RequestToken(_plan, client.Assertion());
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
@@ -139,9 +140,9 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task An_assertion_without_a_kid_is_refused()
     {
-        var client = await SigningClient.Rsa().RegisterAsync(_anonymous);
+        var client = await SigningClient.Rsa().RegisterAsync(_plan);
 
-        var response = await TestProvider.RequestToken(_anonymous, client.Assertion(kid: ""));
+        var response = await TestProvider.RequestToken(_plan, client.Assertion(kid: ""));
 
         await AssertRefused(response, "invalid_client");
     }
@@ -149,9 +150,9 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task An_assertion_whose_kid_matches_no_registered_key_is_refused()
     {
-        var client = await SigningClient.Rsa().RegisterAsync(_anonymous);
+        var client = await SigningClient.Rsa().RegisterAsync(_plan);
 
-        var response = await TestProvider.RequestToken(_anonymous, client.Assertion(kid: "some-other-key"));
+        var response = await TestProvider.RequestToken(_plan, client.Assertion(kid: "some-other-key"));
 
         await AssertRefused(response, "invalid_client");
     }
@@ -162,10 +163,10 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
         // Two keys registered; the token is signed with the first but names the second.
         var first = SigningClient.Rsa();
         var second = SigningClient.Rsa();
-        var client = await first.RegisterAsync(_anonymous, new { keys = new[] { first.PublicJwk(), second.PublicJwk() } });
+        var client = await first.RegisterAsync(_plan, new { keys = new[] { first.PublicJwk(), second.PublicJwk() } });
 
-        var named = await TestProvider.RequestToken(_anonymous, client.Assertion());
-        var misnamed = await TestProvider.RequestToken(_anonymous, client.Assertion(kid: second.KeyId));
+        var named = await TestProvider.RequestToken(_plan, client.Assertion());
+        var misnamed = await TestProvider.RequestToken(_plan, client.Assertion(kid: second.KeyId));
 
         Assert.Equal(HttpStatusCode.OK, named.StatusCode);
         await AssertRefused(misnamed, "invalid_client");
@@ -174,10 +175,10 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task An_assertion_with_a_typ_other_than_JWT_is_refused_but_typ_may_be_left_out()
     {
-        var client = await SigningClient.Rsa().RegisterAsync(_anonymous);
+        var client = await SigningClient.Rsa().RegisterAsync(_plan);
 
-        var wrongTyp = await TestProvider.RequestToken(_anonymous, client.Assertion(typ: "at+jwt"));
-        var noTyp = await TestProvider.RequestToken(_anonymous, client.Assertion(typ: ""));
+        var wrongTyp = await TestProvider.RequestToken(_plan, client.Assertion(typ: "at+jwt"));
+        var noTyp = await TestProvider.RequestToken(_plan, client.Assertion(typ: ""));
 
         await AssertRefused(wrongTyp, "invalid_client");
         Assert.Equal(HttpStatusCode.OK, noTyp.StatusCode);
@@ -186,9 +187,9 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task An_assertion_issued_in_the_future_is_refused()
     {
-        var client = await SigningClient.Rsa().RegisterAsync(_anonymous);
+        var client = await SigningClient.Rsa().RegisterAsync(_plan);
 
-        var response = await TestProvider.RequestToken(_anonymous, client.Assertion(issuedAt: DateTime.UtcNow.AddMinutes(3)));
+        var response = await TestProvider.RequestToken(_plan, client.Assertion(issuedAt: DateTime.UtcNow.AddMinutes(3)));
 
         await AssertRefused(response, "invalid_client");
     }
@@ -196,11 +197,11 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task Refusals_do_not_reveal_whether_a_client_id_exists()
     {
-        var provider = await TestProvider.RegisterAsync(_anonymous);
+        var provider = await TestProvider.RegisterAsync(_plan);
         using var attackersKey = RSA.Create(2048);
 
-        var unknown = await TestProvider.RequestToken(_anonymous, provider.Assertion(clientId: Guid.NewGuid().ToString("N")));
-        var known = await TestProvider.RequestToken(_anonymous, provider.Assertion(signWith: attackersKey));
+        var unknown = await TestProvider.RequestToken(_plan, provider.Assertion(clientId: Guid.NewGuid().ToString("N")));
+        var known = await TestProvider.RequestToken(_plan, provider.Assertion(signWith: attackersKey));
 
         Assert.Equal(await Description(unknown), await Description(known));
     }
@@ -208,7 +209,7 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task Concurrent_requests_with_one_assertion_get_exactly_one_token()
     {
-        var provider = await TestProvider.RegisterAsync(_anonymous);
+        var provider = await TestProvider.RegisterAsync(_plan);
         var assertion = provider.Assertion();
         var clients = Enumerable.Range(0, 20).Select(_ => factory.CreateClient()).ToList();
 
@@ -221,11 +222,11 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task Token_responses_are_never_cached()
     {
-        var provider = await TestProvider.RegisterAsync(_anonymous);
+        var provider = await TestProvider.RegisterAsync(_plan);
 
-        var success = await TestProvider.RequestToken(_anonymous, provider.Assertion());
-        var refused = await TestProvider.RequestToken(_anonymous, "a.b.c");
-        var badRequest = await _anonymous.PostAsync("/auth/token", new StringContent("{}", Encoding.UTF8, "application/json"));
+        var success = await TestProvider.RequestToken(_plan, provider.Assertion());
+        var refused = await TestProvider.RequestToken(_plan, "a.b.c");
+        var badRequest = await _plan.PostAsync("/auth/token", new StringContent("{}", Encoding.UTF8, "application/json"));
 
         foreach (var response in new[] { success, refused, badRequest })
         {
@@ -263,9 +264,9 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [InlineData("system/Claim.write system/ClaimResponse.read system/Questionnaire.read")]
     public async Task SMART_v1_and_v2_scope_spellings_are_granted_as_asked_and_work(string scope)
     {
-        var provider = await TestProvider.RegisterAsync(_anonymous);
+        var provider = await TestProvider.RegisterAsync(_plan);
 
-        var response = await TestProvider.RequestToken(_anonymous, provider.Assertion(), scope + " system/Patient.rs");
+        var response = await TestProvider.RequestToken(_plan, provider.Assertion(), scope + " system/Patient.rs");
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         var http = factory.CreateClient();
         http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", body.GetProperty("access_token").GetString());
@@ -283,9 +284,9 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [InlineData("system/claim.write")]
     public async Task Scopes_that_do_not_map_to_a_permission_are_refused(string scope)
     {
-        var provider = await TestProvider.RegisterAsync(_anonymous);
+        var provider = await TestProvider.RegisterAsync(_plan);
 
-        var response = await TestProvider.RequestToken(_anonymous, provider.Assertion(), scope);
+        var response = await TestProvider.RequestToken(_plan, provider.Assertion(), scope);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal("invalid_scope", (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
@@ -294,7 +295,7 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task A_v2_read_scope_alone_does_not_allow_submitting()
     {
-        var provider = await TestProvider.RegisterAsync(_anonymous);
+        var provider = await TestProvider.RegisterAsync(_plan);
         var readOnly = await provider.SignInAsync(factory, scope: "system/ClaimResponse.rs");
 
         var response = await readOnly.PostAsync("/fhir/Claim/$submit", Fhir(RequestBundle("READ-ONLY")));
@@ -305,7 +306,7 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task Discovery_lists_what_SMART_requires()
     {
-        var discovery = await _anonymous.GetFromJsonAsync<JsonElement>("/fhir/.well-known/smart-configuration");
+        var discovery = await _plan.GetFromJsonAsync<JsonElement>("/fhir/.well-known/smart-configuration");
         string[] Strings(string name) => discovery.GetProperty(name).EnumerateArray().Select(e => e.GetString()!).ToArray();
 
         Assert.Equal(["S256"], Strings("code_challenge_methods_supported"));
@@ -319,7 +320,7 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
         Assert.Contains("system/questionnaire.rs", Strings("scopes_supported"));
         Assert.Equal(["RS384", "ES384"], Strings("token_endpoint_auth_signing_alg_values_supported"));
 
-        var authorize = await _anonymous.GetAsync(new Uri(discovery.GetProperty("authorization_endpoint").GetString()!).PathAndQuery);
+        var authorize = await _plan.GetAsync(new Uri(discovery.GetProperty("authorization_endpoint").GetString()!).PathAndQuery);
         Assert.Equal(HttpStatusCode.BadRequest, authorize.StatusCode);
         Assert.Equal("unsupported_response_type", (await authorize.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
     }
@@ -329,9 +330,9 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task Registering_a_key_set_that_contains_a_private_key_is_refused()
     {
-        var provider = await TestProvider.RegisterAsync(_anonymous);
+        var provider = await TestProvider.RegisterAsync(_plan);
 
-        var response = await _anonymous.PostAsJsonAsync("/internal/clients", new { name = "Careless Clinic (synthetic)", jwks = provider.PublicKeySet(includePrivatePart: true) });
+        var response = await _plan.PostAsJsonAsync("/internal/clients", new { name = "Careless Clinic (synthetic)", jwks = provider.PublicKeySet(includePrivatePart: true) });
 
         Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
     }
@@ -339,7 +340,7 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task Registering_an_RSA_key_under_2048_bits_is_refused()
     {
-        var response = await SigningClient.Rsa(1024).TryRegisterAsync(_anonymous);
+        var response = await SigningClient.Rsa(1024).TryRegisterAsync(_plan);
 
         await AssertProblem(response, HttpStatusCode.UnprocessableEntity, "2048");
     }
@@ -347,7 +348,7 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task Registering_a_symmetric_key_is_refused()
     {
-        var response = await SigningClient.Rsa().TryRegisterAsync(_anonymous,
+        var response = await SigningClient.Rsa().TryRegisterAsync(_plan,
             new { keys = new[] { new { kty = "oct", kid = "shared", k = "c2VjcmV0LXNlY3JldC1zZWNyZXQtc2VjcmV0" } } });
 
         await AssertProblem(response, HttpStatusCode.UnprocessableEntity, "oct");
@@ -360,7 +361,7 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
         var q = p256.ExportParameters(false).Q;
         var jwk = new { kty = "EC", kid = "p256", crv = "P-256", x = Microsoft.IdentityModel.Tokens.Base64UrlEncoder.Encode(q.X), y = Microsoft.IdentityModel.Tokens.Base64UrlEncoder.Encode(q.Y) };
 
-        var response = await SigningClient.Rsa().TryRegisterAsync(_anonymous, new { keys = new[] { jwk } });
+        var response = await SigningClient.Rsa().TryRegisterAsync(_plan, new { keys = new[] { jwk } });
 
         await AssertProblem(response, HttpStatusCode.UnprocessableEntity, "P-384");
     }
@@ -372,8 +373,8 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
         var noKid = client.PublicJwk();
         noKid.Remove("kid");
 
-        var missing = await client.TryRegisterAsync(_anonymous, new { keys = new[] { noKid } });
-        var repeated = await client.TryRegisterAsync(_anonymous, new { keys = new[] { client.PublicJwk(), client.PublicJwk() } });
+        var missing = await client.TryRegisterAsync(_plan, new { keys = new[] { noKid } });
+        var repeated = await client.TryRegisterAsync(_plan, new { keys = new[] { client.PublicJwk(), client.PublicJwk() } });
 
         await AssertProblem(missing, HttpStatusCode.UnprocessableEntity, "kid");
         await AssertProblem(repeated, HttpStatusCode.UnprocessableEntity, "kid");
@@ -389,7 +390,7 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [InlineData("""["not","an","object"]""")]
     public async Task Registration_bodies_of_the_wrong_shape_get_422(string body)
     {
-        var response = await _anonymous.PostAsync("/internal/clients", new StringContent(body, Encoding.UTF8, "application/json"));
+        var response = await _plan.PostAsync("/internal/clients", new StringContent(body, Encoding.UTF8, "application/json"));
 
         Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
     }
@@ -397,7 +398,7 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task A_registration_body_that_is_not_JSON_gets_400()
     {
-        var response = await _anonymous.PostAsync("/internal/clients", new StringContent("{not json", Encoding.UTF8, "application/json"));
+        var response = await _plan.PostAsync("/internal/clients", new StringContent("{not json", Encoding.UTF8, "application/json"));
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
@@ -407,7 +408,7 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task A_CDS_Hooks_JWT_without_sub_is_accepted()
     {
-        var client = await SigningClient.EcP384().RegisterAsync(_anonymous);
+        var client = await SigningClient.EcP384().RegisterAsync(_plan);
 
         var response = await CdsCall(client.Assertion(audience: "http://localhost" + OrderSign, includeSubject: false));
 
@@ -418,7 +419,7 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task A_CDS_Hooks_JWT_without_a_kid_or_used_twice_is_refused()
     {
-        var client = await SigningClient.Rsa().RegisterAsync(_anonymous);
+        var client = await SigningClient.Rsa().RegisterAsync(_plan);
         var once = client.Assertion(audience: "http://localhost" + OrderSign, includeSubject: false);
 
         var noKid = await CdsCall(client.Assertion(audience: "http://localhost" + OrderSign, includeSubject: false, kid: ""));
@@ -455,7 +456,7 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [InlineData("GET", "/fhir/ClaimResponse/anything")]
     public async Task Without_a_token_the_request_endpoints_answer_401(string method, string path)
     {
-        var response = await _anonymous.SendAsync(new HttpRequestMessage(new HttpMethod(method), path));
+        var response = await _plan.SendAsync(new HttpRequestMessage(new HttpMethod(method), path));
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
@@ -466,7 +467,7 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [InlineData("/fhir/.well-known/smart-configuration")]
     public async Task The_descriptive_endpoints_need_no_token(string path)
     {
-        var response = await _anonymous.GetAsync(path);
+        var response = await _plan.GetAsync(path);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
@@ -474,7 +475,7 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task A_token_without_the_read_scope_cannot_read_responses()
     {
-        var provider = await TestProvider.RegisterAsync(_anonymous);
+        var provider = await TestProvider.RegisterAsync(_plan);
         var submitOnly = await provider.SignInAsync(factory, scope: "system/Claim.write");
 
         var response = await submitOnly.GetAsync("/fhir/ClaimResponse/anything");
@@ -485,8 +486,8 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task A_provider_cannot_see_another_providers_request()
     {
-        var clinicA = await (await TestProvider.RegisterAsync(_anonymous, "Clinic A (synthetic)")).SignInAsync(factory);
-        var clinicB = await (await TestProvider.RegisterAsync(_anonymous, "Clinic B (synthetic)")).SignInAsync(factory);
+        var clinicA = await (await TestProvider.RegisterAsync(_plan, "Clinic A (synthetic)")).SignInAsync(factory);
+        var clinicB = await (await TestProvider.RegisterAsync(_plan, "Clinic B (synthetic)")).SignInAsync(factory);
         var submitted = await clinicA.PostAsync("/fhir/Claim/$submit", Fhir(RequestBundle("SHARED-ID")));
         var id = (await submitted.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("entry")[0].GetProperty("resource").GetProperty("id").GetString();
 
@@ -504,8 +505,8 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task Two_providers_can_use_the_same_request_identifier_without_colliding()
     {
-        var clinicA = await (await TestProvider.RegisterAsync(_anonymous, "Clinic A (synthetic)")).SignInAsync(factory);
-        var clinicB = await (await TestProvider.RegisterAsync(_anonymous, "Clinic B (synthetic)")).SignInAsync(factory);
+        var clinicA = await (await TestProvider.RegisterAsync(_plan, "Clinic A (synthetic)")).SignInAsync(factory);
+        var clinicB = await (await TestProvider.RegisterAsync(_plan, "Clinic B (synthetic)")).SignInAsync(factory);
 
         var fromA = await clinicA.PostAsync("/fhir/Claim/$submit", Fhir(RequestBundle("SAME-NUMBER")));
         var fromB = await clinicB.PostAsync("/fhir/Claim/$submit", Fhir(RequestBundle("SAME-NUMBER")));
@@ -516,10 +517,10 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task The_request_is_recorded_under_the_registered_name_not_the_name_the_request_claims()
     {
-        var clinic = await (await TestProvider.RegisterAsync(_anonymous, "Registered Clinic Name (synthetic)")).SignInAsync(factory);
+        var clinic = await (await TestProvider.RegisterAsync(_plan, "Registered Clinic Name (synthetic)")).SignInAsync(factory);
         var id = await ResponseId(await clinic.PostAsync("/fhir/Claim/$submit", Fhir(RequestBundle($"REQ-{Guid.NewGuid():N}"))));
 
-        var queue = await _anonymous.GetFromJsonAsync<JsonElement>("/internal/requests");
+        var queue = await _plan.GetFromJsonAsync<JsonElement>("/internal/requests");
         var request = queue.EnumerateArray().Single(r => r.GetProperty("id").GetString() == id);
 
         Assert.Equal("Registered Clinic Name (synthetic)", request.GetProperty("providerName").GetString());
@@ -536,7 +537,7 @@ public class SignInTests(ApiFactory factory) : IClassFixture<ApiFactory>
             Content = new StringContent("""{"hook":"order-sign","hookInstance":"x","context":{}}""", Encoding.UTF8, "application/json"),
         };
         request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", jwt);
-        return _anonymous.SendAsync(request);
+        return _plan.SendAsync(request);
     }
 
     private static FormUrlEncodedContent TokenForm(string assertion) => new(new Dictionary<string, string>

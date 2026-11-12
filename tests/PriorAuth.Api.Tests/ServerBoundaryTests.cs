@@ -11,21 +11,54 @@ public class ServerBoundaryTests(ApiFactory factory) : IClassFixture<ApiFactory>
     // ---------- Internal endpoints ----------
 
     [Fact]
-    public async Task The_review_queue_refuses_a_caller_on_another_machine()
+    public async Task The_review_queue_needs_a_staff_sign_in()
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, "/internal/requests");
-        request.Headers.Add(ApiFactory.RemoteAddressHeader, "203.0.113.7");
+        var response = await factory.Anonymous().GetAsync("/internal/requests");
 
-        Assert.Equal(HttpStatusCode.Forbidden, (await factory.CreateClient().SendAsync(request)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     [Fact]
-    public async Task The_review_queue_refuses_a_request_forwarded_by_a_proxy()
+    public async Task The_portal_sends_someone_not_signed_in_to_sign_in()
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, "/internal/requests");
-        request.Headers.Add("X-Forwarded-For", "203.0.113.7");
+        var response = await factory.Anonymous().GetAsync("/requests/anything");
 
-        Assert.Equal(HttpStatusCode.Forbidden, (await factory.CreateClient().SendAsync(request)).StatusCode);
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.StartsWith("http://localhost/staff/dev-sign-in", response.Headers.Location!.ToString());
+    }
+
+    [Fact]
+    public async Task An_admin_cannot_see_the_review_queue()
+    {
+        var response = await factory.SignedInAs(ApiFactory.AdminAccount).GetAsync("/internal/requests");
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Someone_who_works_the_queue_cannot_register_provider_systems()
+    {
+        var response = await factory.SignedInAs(ApiFactory.ClinicianAccount).GetAsync("/internal/clients");
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task There_is_no_test_user_sign_in_for_an_account_that_is_not_configured()
+    {
+        var response = await factory.Anonymous().PostAsync("/staff/dev-sign-in",
+            new FormUrlEncodedContent([new("account", @"COUNTY\someone.real"), new("returnUrl", "/")]));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Test_user_sign_in_never_redirects_to_another_site()
+    {
+        var response = await factory.Anonymous().PostAsync("/staff/dev-sign-in",
+            new FormUrlEncodedContent([new("account", ApiFactory.ClinicianAccount), new("returnUrl", "//attacker.example/")]));
+
+        Assert.Equal("/", response.Headers.Location!.ToString());
     }
 
     [Fact]
@@ -38,7 +71,7 @@ public class ServerBoundaryTests(ApiFactory factory) : IClassFixture<ApiFactory>
     }
 
     [Fact]
-    public async Task An_internal_change_without_the_review_page_header_is_refused()
+    public async Task An_internal_change_without_the_portal_header_is_refused()
     {
         var bare = factory.CreateClient();
         bare.DefaultRequestHeaders.Remove(PriorAuth.Api.Auth.AuthSetup.InternalRequestHeader);
@@ -51,7 +84,7 @@ public class ServerBoundaryTests(ApiFactory factory) : IClassFixture<ApiFactory>
     // ---------- Headers that protect answers ----------
 
     [Fact]
-    public async Task Answers_are_never_cached_and_the_review_page_cannot_be_framed()
+    public async Task Answers_are_never_cached_and_the_portal_cannot_be_framed()
     {
         var client = factory.CreateClient();
 
@@ -59,6 +92,7 @@ public class ServerBoundaryTests(ApiFactory factory) : IClassFixture<ApiFactory>
         var page = await client.GetAsync("/");
 
         Assert.True(queue.Headers.CacheControl?.NoStore);
+        Assert.True(page.Headers.CacheControl?.NoStore);
         Assert.Equal("DENY", page.Headers.GetValues("X-Frame-Options").Single());
         Assert.Contains("frame-ancestors 'none'", page.Headers.GetValues("Content-Security-Policy").Single());
         Assert.False(page.Headers.Contains("Server"));

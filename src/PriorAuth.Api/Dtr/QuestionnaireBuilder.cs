@@ -5,7 +5,7 @@ using PriorAuth.Api.Domain;
 namespace PriorAuth.Api.Dtr;
 
 /// <summary>
-/// Turns a service requirement's questions into a FHIR Questionnaire (Da Vinci DTR).
+/// Turns one of the plan's questionnaires into a FHIR Questionnaire (Da Vinci DTR). Several services may share one.
 /// NOTE: these questionnaires have no CQL pre-population logic, so the provider's system
 /// cannot fill answers from the chart automatically. The DTR profile allows that, but
 /// automatic filling is the main benefit of DTR and is not delivered yet.
@@ -15,30 +15,35 @@ public static class QuestionnaireBuilder
     public const string Version = "1";
     public const string Profile = "http://hl7.org/fhir/us/davinci-dtr/StructureDefinition/dtr-std-questionnaire";
 
-    public static string Url(ServiceRequirement requirement, string baseUrl) => $"{baseUrl}/fhir/Questionnaire/{requirement.QuestionnaireId}";
+    public static string Url(string questionnaireId, string baseUrl) => $"{baseUrl}/fhir/Questionnaire/{questionnaireId}";
 
-    public static Questionnaire Build(ServiceRequirement requirement, string baseUrl)
+    public static Questionnaire Build(QuestionnaireDefinition definition, string baseUrl)
     {
         var answerSystem = $"{baseUrl}/fhir/CodeSystem/prior-auth-answers";
-        var title = $"Prior authorization request: {requirement.Name}";
+        var documents = definition.Documentation.Length == 0
+            ? ""
+            : "<p>Documents to send with the request:</p><ul>" + string.Concat(definition.Documentation.Select(d => $"<li>{WebUtility.HtmlEncode(d)}</li>")) + "</ul>";
+        var draftNote = definition.IsDraft ? "<p>Draft: not yet signed off by the plan's clinical lead.</p>" : "";
 
         return new Questionnaire
         {
-            Id = requirement.QuestionnaireId,
+            Id = definition.Id,
             Meta = new Meta { Profile = [Profile] },
             Text = new Narrative
             {
                 Status = Narrative.NarrativeStatus.Generated,
-                Div = $"<div xmlns=\"http://www.w3.org/1999/xhtml\"><p>{WebUtility.HtmlEncode(title)}</p><ol>" +
-                      string.Concat(requirement.Questions.Select(q => $"<li>{WebUtility.HtmlEncode(q.Text)}</li>")) + "</ol></div>",
+                Div = $"<div xmlns=\"http://www.w3.org/1999/xhtml\"><p>{WebUtility.HtmlEncode(definition.Title)}</p>{draftNote}<ol>" +
+                      string.Concat(definition.Questions.Select(q => $"<li>{WebUtility.HtmlEncode(q.Text)}</li>")) + $"</ol>{documents}</div>",
             },
-            Url = Url(requirement, baseUrl),
+            Url = Url(definition.Id, baseUrl),
             Version = Version,
-            Name = "PriorAuth" + requirement.Code,
-            Title = title,
-            Status = PublicationStatus.Active,
+            Name = Name(definition.Id),
+            Title = definition.Title,
+            // A questionnaire the plan has not signed off is published as a draft, so no one mistakes it for final policy.
+            Status = definition.IsDraft ? PublicationStatus.Draft : PublicationStatus.Active,
+            Description = definition.Documentation.Length == 0 ? null : "Documents to send with the request: " + string.Join("; ", definition.Documentation) + ".",
             SubjectType = [ResourceType.Patient],
-            Item = requirement.Questions.Select(q => new Questionnaire.ItemComponent
+            Item = definition.Questions.Select(q => new Questionnaire.ItemComponent
             {
                 LinkId = q.LinkId,
                 Text = q.Text,
@@ -59,15 +64,19 @@ public static class QuestionnaireBuilder
         };
     }
 
+    /// <summary>A computer-friendly name (FHIR: starts with a capital letter, letters and digits only), for example DtrMhpYouth.</summary>
+    private static string Name(string id) =>
+        string.Concat(id.Split(['-', '.'], StringSplitOptions.RemoveEmptyEntries).Select(part => char.ToUpperInvariant(part[0]) + part[1..]));
+
     /// <summary>
     /// The package a provider's system downloads: the Questionnaire first, then a draft response to fill in.
     /// The draft follows the DTR QuestionnaireResponse profile: it names the patient, when it was made,
     /// the Coverage(s) and order(s) it is for (qr-context), its purpose (intendedUse "withpa") and one item
     /// per question, unanswered. Context or subject the caller did not supply is left out, not invented.
     /// </summary>
-    public static Bundle Package(ServiceRequirement requirement, string baseUrl, DraftContext context)
+    public static Bundle Package(QuestionnaireDefinition definition, string baseUrl, DraftContext context)
     {
-        var questionnaire = Build(requirement, baseUrl);
+        var questionnaire = Build(definition, baseUrl);
         var draft = new QuestionnaireResponse
         {
             Meta = new Meta { Profile = [ResponseProfile] },
@@ -75,7 +84,7 @@ public static class QuestionnaireBuilder
             Status = QuestionnaireResponse.QuestionnaireResponseStatus.InProgress,
             Subject = context.Subject,
             Authored = new FhirDateTime(context.Authored).Value,
-            Item = requirement.Questions.Select(q => new QuestionnaireResponse.ItemComponent { LinkId = q.LinkId, Text = q.Text }).ToList(),
+            Item = definition.Questions.Select(q => new QuestionnaireResponse.ItemComponent { LinkId = q.LinkId, Text = q.Text }).ToList(),
         };
         foreach (var reference in context.Coverages.Concat(context.Orders))
             draft.Extension.Add(new Extension(ContextExtension, new ResourceReference(reference)));

@@ -4,8 +4,14 @@
     {
       "name": "prior-auth-api",
       "runtimeExecutable": "dotnet",
-      "runtimeArgs": ["run", "--project", "src/PriorAuth.Api", "--no-launch-profile", "--urls", "http://localhost:5020"],
+      "runtimeArgs": ["run", "--project", "src/PriorAuth.Api", "--no-launch-profile", "--", "--urls", "http://localhost:5020", "--environment", "Development"],
       "port": 5020
+    },
+    {
+      "name": "clinic-demo",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "samples/PriorAuth.ClinicDemo", "--no-launch-profile", "--", "--urls", "http://localhost:5030", "--PlanApi", "http://localhost:5020"],
+      "port": 5030
     },
     {
       "name": "prior-auth-prototype",

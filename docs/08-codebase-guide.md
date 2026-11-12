@@ -57,7 +57,9 @@ prior-auth-api/
 │   ├── Domain/
 │   │   ├── AuthorizationRequest.cs    aggregate root + HistoryEntry, SupportingDocument, ReceivedBundle, NewDocument
 │   │   ├── ServiceRequirement.cs      ServiceRequirement, RequirementQuestion, ServiceRequirementCatalog, CodeSystems
-│   │   └── PlanClock.cs               the plan's calendar (time zone aware "today")
+│   │   ├── Staff.cs                   StaffRole, Staff (who may work the queue and decide what)
+│   │   ├── StaffMember.cs             people who have signed in to the portal, for assigning
+│   │   └── PlanClock.cs               the plan's calendar (time zone aware "today" and local times)
 │   ├── Fhir/
 │   │   ├── FhirEndpoints.cs           /fhir/metadata, /requirements, $submit, $inquire, ClaimResponse read, CapabilityStatement
 │   │   ├── PasMapper.cs               PAS Bundle -> Submission; AuthorizationRequest -> ClaimResponse / response Bundle
@@ -71,9 +73,18 @@ prior-auth-api/
 │   │   ├── PackageRequest.cs          reads $questionnaire-package input Parameters
 │   │   └── QuestionnaireBuilder.cs    ServiceRequirement -> Questionnaire, package Bundle, draft QuestionnaireResponse
 │   ├── Review/
-│   │   └── ReviewerEndpoints.cs       /internal/requests: queue, document download, approve / deny / request-information
+│   │   ├── ReviewDesk.cs              every staff action on a request; DenialReasons from configuration
+│   │   └── ReviewerEndpoints.cs       /internal/requests: queue JSON, document download, the ReviewDesk actions
+│   ├── Pages/                         the staff portal (Razor Pages)
+│   │   ├── Index.cshtml               the review queue
+│   │   ├── Requests/Detail.cshtml     one request: facts, claim and assign, decision forms, documents, history
+│   │   ├── Providers/Index.cshtml     register and switch off provider systems (admin)
+│   │   ├── NoAccess.cshtml            signed in without the role a page needs
+│   │   ├── SignIn/DevSignIn.cshtml    Development only: pick a test user
+│   │   └── Shared/_Layout.cshtml      header, navigation, banner, styles
 │   ├── Auth/
-│   │   ├── AuthSetup.cs               JwtBearer + one policy per scope; LocalCallersOnly guard for /internal
+│   │   ├── AuthSetup.cs               JwtBearer + one policy per scope; StaffOnly for /internal
+│   │   ├── StaffSignIn.cs             staff sign-in: Windows (Negotiate) or the Development test users; AD groups to roles
 │   │   ├── TokenEndpoint.cs           /auth/token, /auth/authorize, smart-configuration
 │   │   ├── ClientAssertions.cs        validates client-signed JWTs (token endpoint and CDS Hooks); PublicUrl
 │   │   ├── ClientKeys.cs              which JWKs may be registered and used
@@ -84,12 +95,12 @@ prior-auth-api/
 │   │   ├── PriorAuthDb.cs             EF Core model, provider choice, collation, concurrency, UTC converter
 │   │   ├── DesignTimeDbFactory.cs     lets `dotnet ef` build the SQL Server model without connecting
 │   │   ├── DatabaseHealthCheck.cs     /health
-│   │   └── Migrations/                SQL Server migrations (Initial, AuditFixes)
+│   │   └── Migrations/                SQL Server migrations (Initial, AuditFixes, ReviewType, StaffSignIn)
 │   └── wwwroot/
-│       ├── index.html                 reviewer queue page (plain JS, calls /internal/requests)
 │       └── developers.html            guide for provider-system developers
 ├── tests/PriorAuth.Api.Tests/         xUnit; real app in-process (section 15)
 ├── samples/PriorAuth.SampleClient/    console app acting as a provider system end to end
+├── samples/PriorAuth.ClinicDemo/      browser demo of a clinic sending a request, for non-developers
 └── prototype/PriorAuth.Prototype/     throwaway learning prototype; not part of the service
 ```
 
@@ -136,6 +147,9 @@ sequenceDiagram
     Note right of DI: validates the list - throws on duplicate code,<br/>bad question type, colliding option codes
     P->>DI: resolve PlanClock
     Note right of DI: throws if Plan:TimeZone is unknown
+    P->>DI: resolve DenialReasons
+    Note right of DI: throws if the list is empty or repeats a code
+    Note over P: AddStaffSignIn already threw if StaffSignIn:Mode<br/>is Development outside the Development environment
     P->>P: PublicUrl.ValidateConfiguration
     Note right of P: outside Development, Auth:PublicBaseUrl<br/>must be an absolute https URL
     P->>DB: SQL Server: Migrate()  /  SQLite: EnsureCreated()
@@ -155,6 +169,10 @@ Registered services:
 | `ClientAssertions` | scoped | `AuthSetup.AddProviderSignIn` | Uses `IMemoryCache` for the jti replay check |
 | `IMemoryCache` | singleton | `AuthSetup.AddProviderSignIn` | |
 | JwtBearer authentication + one authorization policy per scope | — | `AuthSetup.AddProviderSignIn` | Policy name = scope name |
+| Staff authentication: the `Staff` policy scheme, forwarding to Negotiate or the Development cookie; the `StaffQueue`, `StaffAdmin` and `StaffAnyRole` policies; `WindowsGroupRoles` (`IClaimsTransformation`) | — | `StaffSignIn.AddStaffSignIn` | Mode from `StaffSignIn:Mode` |
+| `DenialReasons` | singleton | Program.cs | From the `DenialReasons` config section |
+| `ReviewDesk` | scoped | Program.cs | Used by the portal pages and `ReviewerEndpoints` |
+| Razor Pages, with folder authorization conventions | — | Program.cs | `/` any role, `/Requests` queue, `/Providers` admin; `/NoAccess` and `/SignIn/DevSignIn` anonymous |
 | Health checks (`DatabaseHealthCheck`) | — | Program.cs | `/health` |
 
 `service-requirements.json` is loaded with `reloadOnChange: false`. Editing it needs a restart, and that is deliberate: the catalog is validated once.
@@ -167,21 +185,21 @@ Middleware runs in this order for every request. Host filtering comes first, add
 flowchart TD
     IN([request]) --> HF["Host filtering<br/>AllowedHosts; 400 for other Host headers"]
     HF --> EX["UseExceptionHandler<br/>BadHttpRequestException keeps its status (e.g. 413);<br/>anything else becomes 500; body is an OperationOutcome"]
-    EX --> SEC["Security headers (all paths)<br/>nosniff, Referrer-Policy, X-Frame-Options DENY, CSP;<br/>no-store + Pragma on /fhir, /internal, /auth, /cds-services"]
+    EX --> SEC["Security headers (all paths)<br/>nosniff, Referrer-Policy, X-Frame-Options DENY, CSP,<br/>no-store + Pragma"]
     SEC --> NEG{"path starts /fhir?"}
     NEG -- yes --> FMT["Negotiation<br/>406 if _format or Accept excludes FHIR JSON;<br/>415 if a POST has a body that is not JSON"]
     NEG -- no --> STATIC
-    FMT --> STATIC["UseDefaultFiles + UseStaticFiles<br/>/ -> index.html, /developers.html"]
-    STATIC --> AUTHN["UseAuthentication<br/>JwtBearer; OnTokenValidated checks the client is still active"]
-    AUTHN --> AUTHZ["UseAuthorization<br/>policy = scope; OnChallenge 401 / OnForbidden 403 as OperationOutcome"]
+    FMT --> STATIC["UseStaticFiles<br/>/developers.html"]
+    STATIC --> AUTHN["UseAuthentication<br/>JwtBearer for providers (checks the client is still active);<br/>the Staff scheme for plan staff, then WindowsGroupRoles adds roles"]
+    AUTHN --> AUTHZ["UseAuthorization<br/>providers: policy = scope; staff: StaffQueue, StaffAdmin, StaffAnyRole"]
     AUTHZ --> SCP["UseStatusCodePages<br/>bodyless 404/405 on /fhir become OperationOutcome"]
-    SCP --> EP["Endpoint<br/>(endpoint filters such as LocalCallersOnly run here)"]
+    SCP --> EP["Endpoint or Razor Page<br/>(StaffOnly's header check and the pages' anti-forgery check run here)"]
 ```
 
 Things that follow from this order:
 
 - **415 waits for a body.** The check runs only when a POST has a body, so an unauthenticated empty POST gets 401 rather than 415.
-- **Static files skip authentication.** Anything in `wwwroot` is public, so never put member data there.
+- **Static files skip authentication.** Anything in `wwwroot` is public, so never put member data there. Do not add an `index.html`: the portal's queue is at `/`.
 - **Size limit.** `$submit` raises Kestrel's body limit through endpoint metadata (`SizeLimit` in `FhirEndpoints`). Going over it throws `BadHttpRequestException` (413), which the exception handler turns into an OperationOutcome.
 
 ## 5. Endpoint map
@@ -203,11 +221,15 @@ Things that follow from this order:
 | `POST /fhir/Questionnaire/$questionnaire-package` | `DtrEndpoints` | token with `system/Questionnaire.read` | Parameters with PackageBundle(s) |
 | `POST /fhir/Questionnaire/$log-questionnaire-errors` | `DtrEndpoints` | token with `system/Questionnaire.read` | informational OperationOutcome |
 | `GET/POST /fhir/ValueSet/$expand` | `DtrEndpoints` | token with `system/Questionnaire.read` | always 404 OperationOutcome |
-| `GET /internal/requests?status&skip&take` | `ReviewerEndpoints` | `LocalCallersOnly` | queue JSON |
-| `GET /internal/requests/{id}/documents/{documentId}` | `ReviewerEndpoints` | `LocalCallersOnly` | file download |
-| `POST /internal/requests/{id}/approve` · `/deny` · `/request-information` | `ReviewerEndpoints` | `LocalCallersOnly` + `X-Requested-By` | decision JSON; 409 / 422 problem |
-| `GET /internal/clients` · `POST /internal/clients` · `POST /internal/clients/{id}/deactivate` | `ClientRegistrationEndpoints` | `LocalCallersOnly` (+ header on POST) | JSON; 201 on register |
-| `GET /`, `/developers.html` | static files | anyone | HTML |
+| `GET /internal/requests?status&skip&take` | `ReviewerEndpoints` | staff with a queue role | queue JSON |
+| `GET /internal/requests/{id}/documents/{documentId}` | `ReviewerEndpoints` | staff with a queue role | file download |
+| `POST /internal/requests/{id}/claim` · `/release` · `/assign` · `/approve` · `/approve-with-changes` · `/deny` · `/request-information` | `ReviewerEndpoints` → `ReviewDesk` | staff with a queue role + `X-Requested-By`; the domain checks the specific role | request JSON; 409 / 422 problem |
+| `GET /internal/clients` · `POST /internal/clients` · `POST /internal/clients/{id}/deactivate` | `ClientRegistrationEndpoints` | staff admin (+ header on POST) | JSON; 201 on register |
+| `GET /` · `/requests/{id}` (and its form posts) | Razor Pages → `ReviewDesk` | staff with a queue role (admins are sent to `/providers`) | HTML |
+| `GET /providers` (and its form posts) | Razor Page | staff admin | HTML |
+| `GET /no-access` | Razor Page | anyone | HTML |
+| `GET /staff/dev-sign-in` · `POST /staff/dev-sign-in` · `POST /staff/sign-out` | Razor Page, `StaffSignIn` | anyone; mapped only in Development mode | HTML; redirect |
+| `GET /developers.html` | static file | anyone | HTML |
 
 The FHIR, token and CDS endpoints answer in three different error formats; see [section 13](#13-cross-cutting-conventions).
 
@@ -230,9 +252,15 @@ classDiagram
         +AuthorizationStatus Status
         +string? AuthorizationNumber
         +DateOnly? AuthorizedThrough
+        +ReviewType? ReviewType
+        +string? Modification
+        +string? DenialReasonCode
         +string? Reason
+        +string? AssignedTo
+        +string? AssignedToName
         +DateTime? DecidedAtUtc
         +string? DecidedBy
+        +string? DecidedByAccount
         +DateTime ReceivedAtUtc
         +DateTime LastChangedAtUtc
         +int Version
@@ -241,10 +269,16 @@ classDiagram
         +MismatchWith(details) string?
         +KeepResubmission(json, now, hashesOnFile)
         +SupplyInformation(documents, now, hashesOnFile) bool
-        +Approve(through, number, reviewer, now, today)
-        +Deny(reason, reviewer, now)
-        +RequestInformation(missing, reviewer, now)
+        +Claim(by, now)
+        +AssignTo(to, by, now)
+        +Release(by, now)
+        +Approve(through, number, by, now, today)
+        +ApproveWithChanges(through, change, number, by, now, today)
+        +Deny(reasonCode, reason, by, now)
+        +RequestInformation(missing, by, now)
     }
+    class Staff { <<record>> +Account +DisplayName +Roles +WorksQueue +MayDecide(reviewType) }
+    class StaffMember { +Account +DisplayName +Roles +LastSeenAtUtc +AsStaff() }
     class HistoryEntry { +DateTime AtUtc +string Actor +string Text }
     class SupportingDocument { +string Id +string Title +string ContentType +byte[] Data +int SizeBytes +string Sha256 }
     class ReceivedBundle { +string Json +string Sha256 +DateTime ReceivedAtUtc }
@@ -268,9 +302,15 @@ classDiagram
 | `MismatchWith` | always (pure check) | — (returns a message) | Different service system/code, or different member (by identifier if both have one, else by name), means the identifier is being reused | — |
 | `KeepResubmission` | always | — | Stores a later Bundle unless it is the original or its SHA-256 is already on file | — (bumps `Version`) |
 | `SupplyInformation` | `InformationRequested` | not waiting for information | Adds only documents whose SHA-256 is new; if any, back to `Pended` and clears `Reason`. Returns false if nothing was new | "Provider supplied more information in answer to: …" |
-| `Approve` | `Pended` or `InformationRequested` | closed; no reviewer; `through` before the plan's today | `Approved`, sets number and end date, clears reason | "Approved through … as …" |
-| `Deny` | open | closed; no reviewer; blank reason | `Denied`, sets reason, clears number and end date | "Denied: …" |
-| `RequestInformation` | open | closed; no reviewer; blank text | `InformationRequested`, sets reason | "More information requested: …" |
+| `Claim` | open | closed; `by` does not work the queue; someone else holds it | `AssignedTo` = `by` | "Claimed by …." |
+| `AssignTo` | open | closed; `by` is not a coordinator; `to` does not work the queue | `AssignedTo` = `to` | "Assigned to …." |
+| `Release` | claimed | not claimed; `by` is neither the holder nor a coordinator | clears `AssignedTo` | "Released by …; back in the queue." |
+| `Approve` | `Pended` or `InformationRequested` | closed; `by` may not decide this review type; someone else holds it; `through` before the plan's today | `Approved`, sets number and end date, clears reason; records `DecidedBy` and `DecidedByAccount`; releases the claim | "Approved through … as …" |
+| `ApproveWithChanges` | as `Approve` | as `Approve`; blank change | as `Approve`, and sets `Modification` | "Approved with changes through …: …" |
+| `Deny` | open | closed; `by` may not decide; someone else holds it; blank code or reason | `Denied`, sets `DenialReasonCode` and reason, clears number and end date; releases the claim | "Denied (code): …" |
+| `RequestInformation` | `Pended` | not pended; `by` does not work the queue; someone else holds it; blank text | `InformationRequested`, sets reason | "More information requested: …" |
+
+Who may decide comes from `Staff.MayDecide(ReviewType)`: a licensed clinician or a physician, and only a physician for `ConcurrentReview`. `ReviewDesk` checks that a denial code is in `DenialReasons`; the domain only checks it is not blank.
 
 **Invariant:** every change goes through `Record` or `Touch`, and both set `LastChangedAtUtc` and increment `Version`. `Version` is the EF concurrency token, so a state change that skips `Touch` is not protected against a lost update. Add new behaviour the same way.
 
@@ -448,37 +488,36 @@ The full status-to-FHIR table is in [How it works](02-how-it-works.md#how-fhir-m
 - **`$inquire`** takes the Claim's first identifier and finds the caller's own request by system and value. No match gives a 200 with an empty `collection` Bundle; a missing Claim or identifier gives 400.
 - **`ClaimResponse/{id}`** finds the request by id *and* the caller's client id, so another provider's id answers 404. It sends `ETag: W/"{Version}"` and `Last-Modified`, and an `If-None-Match` that matches gets a 304.
 
-## 9. Reviewer endpoints
+## 9. Staff portal and reviewer endpoints
 
-[Review/ReviewerEndpoints.cs](../src/PriorAuth.Api/Review/ReviewerEndpoints.cs). Every route is in a group with the `LocalCallersOnly` filter ([section 10](#the-internal-endpoint-guard)).
+Every staff action goes through [Review/ReviewDesk.cs](../src/PriorAuth.Api/Review/ReviewDesk.cs), whether it comes from a portal page ([Pages/Requests/Detail.cshtml.cs](../src/PriorAuth.Api/Pages/Requests/Detail.cshtml.cs)) or from [Review/ReviewerEndpoints.cs](../src/PriorAuth.Api/Review/ReviewerEndpoints.cs). The endpoints' group requires the `StaffQueue` policy and, for changes, the `X-Requested-By` header (`AuthSetup.StaffOnly`).
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant UI as index.html
-    participant EP as ReviewerEndpoints
+    participant UI as Request page (or JSON caller)
+    participant D as ReviewDesk
     participant AR as AuthorizationRequest
     participant DB as PriorAuthDb
-    UI->>EP: GET /internal/requests?status=open&take=200
-    EP->>DB: projected page (no Bundle, no file bytes)
-    EP->>DB: documents for page ids, history for page ids
-    EP-->>UI: JSON list (includes Version)
-    UI->>EP: POST /internal/requests/{id}/approve {through, reviewer} + X-Requested-By
-    EP->>DB: load request (tracked)
-    EP->>AR: Approve(through, PA-yyyyMMdd-XXXXXX, reviewer, clock.UtcNow, clock.Today)
-    EP->>DB: SaveChanges (WHERE Version = loaded)
+    UI->>UI: page posts its Version; refused at once if the request has moved on
+    UI->>D: Approve(id, through, Staff from the sign-in)
+    D->>DB: load request (tracked)
+    D->>AR: Approve(through, PA-yyyyMMdd-XXXXXX, staff, clock.UtcNow, clock.Today)
+    D->>DB: SaveChanges (WHERE Version = loaded)
     alt DomainRuleException
-        EP-->>UI: 422 problem+json
+        D-->>UI: Refused, with the rule's sentence (422 for JSON)
     else DbUpdateConcurrencyException
-        EP-->>UI: 409 problem+json (page reloads)
+        D-->>UI: Conflict (409 for JSON)
     else ok
-        EP-->>UI: 200 {id, status, authorizationNumber, ..., version}
+        D-->>UI: Done (the page redirects and shows a notice)
     end
 ```
 
-- **Authorization numbers** are `PA-{plan date yyyyMMdd}-{6 hex}`, made in `NewAuthorizationNumber`.
+- **Who did it** is the signed-in `Staff` (`User.CurrentStaff()`), never a name in the request body.
+- **Authorization numbers** are `PA-{plan date yyyyMMdd}-{6 hex}`, made in `ReviewDesk.NewAuthorizationNumber`.
+- **Assigning** looks the person up in `StaffMembers`, so they must have signed in once.
 - **Document download** always sends the file as an attachment, with `nosniff` and a sanitized file name.
-- **The reviewer's name is free text** from the request body until staff sign-in exists (#18).
+- **Pages post back to themselves** with Razor Pages' anti-forgery token, and use post-redirect-get, so a refresh does not repeat an action.
 
 ## 10. Sign-in internals
 
@@ -542,15 +581,20 @@ Registration (`CheckKeySet`) and every use (`Unusable`) apply the same rules:
 - `use` is `sig` and `alg` is RS384 or ES384, when either is given;
 - the key has no private or symmetric members.
 
-### The internal-endpoint guard
+### Staff sign-in
 
-`AuthSetup.LocalCallersOnly()` is an endpoint filter, not authentication. It lets a request through only when all of these hold:
-- the remote address is loopback;
-- no `X-Forwarded-For`, `Forwarded`, `X-Forwarded-Host` or `X-Real-IP` header is present;
-- the Host is `localhost`, `127.0.0.1` or `::1`;
-- for anything other than GET or HEAD, `X-Requested-By: prior-auth-reviewer` is present.
+[Auth/StaffSignIn.cs](../src/PriorAuth.Api/Auth/StaffSignIn.cs). The `Staff` policy scheme forwards to one of two handlers, chosen once from `StaffSignIn:Mode`:
 
-Otherwise it returns a bare 403. It is a stopgap until staff sign-in (#18); never put the service behind a reverse proxy on the same machine while it is the only control.
+- **Windows** (default outside Development): ASP.NET Core's Negotiate handler (Kerberos, or NTLM). `WindowsGroupRoles`, an `IClaimsTransformation`, reads the four `StaffSignIn:Groups:*` settings and adds a role claim for each group the account is in (`RolesFromGroups`). It reads the person's display name from Active Directory (cached ten minutes; the account name if it cannot), and records the person in `StaffMembers`, at most every ten minutes.
+
+Roles are the portal's own claim, `StaffSignIn.RoleClaim`, and the policies check that claim. Never check a staff role with `IsInRole` or `RequireRole`: under Windows sign-in those also answer for any Windows group with the same name, so a group called `Admin` would grant the Admin role.
+- **Development**: a cookie, set by `POST /staff/dev-sign-in` for one of `StaffSignIn:TestUsers`. `Mode` throws if this is configured outside the Development environment.
+
+`User.CurrentStaff()` turns the signed-in principal into a `Staff`. Without a sign-in the portal redirects to the sign-in page (Development) or Windows challenges; `/internal` answers 401. Signed in without the role, the portal shows `/no-access` (the Development cookie redirects there; under Windows, `UseStatusCodePages` turns a bare 403 on a portal GET into that redirect) and `/internal` answers 403. `/no-access` is open to all, so it reads the staff sign-in itself to say who the person is and which groups give access.
+
+Pages decide which actions to offer by asking the request: `MayBeClaimedBy`, `MayBeAssignedBy`, `MayBeReleasedBy`, `MayBeDecidedBy`, `MayBeAskedForInformationBy`. These sit next to the methods that act, which enforce the same rules; don't re-derive them in a page.
+
+`AuthSetup.StaffOnly(policy)` puts a route group behind a staff policy and refuses a change (anything but GET or HEAD) without `X-Requested-By: prior-auth-reviewer`, so a form on another site cannot post to it.
 
 ## 11. CRD internals
 
@@ -577,13 +621,13 @@ flowchart TD
     K -- no --> CARD1["info card: order incomplete"]
     K -- yes --> L{"coverage: order.insurance, else prefetched Coverage id"}
     L -- none --> CARD2["info card: coverage not supplied"]
-    L -- found --> M["build coverage-information extension<br/>covered / pa-needed from catalog.Match;<br/>doc-needed, doc-purpose withpa, questionnaire only on order-sign"]
+    L -- found --> M["build coverage-information extension<br/>pa-needed and reason from the review rule (catalog.Match, no modifiers);<br/>doc-needed, doc-purpose withpa, questionnaire only on order-sign"]
     M --> N{"same assertion already on the order<br/>for this coverage? (ignoring date and id)"}
     N -- yes --> NOOP[no update]
     N -- no --> UPD["add date + coverage-assertion-id,<br/>replace old extension for this coverage,<br/>systemAction 'update' with the order"]
 ```
 
-- **Answers.** Services on the list get `covered` and `auth-needed`. Anything else gets `conditional` and `no-auth`; this is under review in #23.
+- **Answers.** `covered` is always `conditional` (no enrolment check). `pa-needed` follows the service's review rule: `auth-needed` for prior authorization; `no-auth` with a `reason` for concurrent review, for listed services the plan may not prior-authorize, and plain `no-auth` for well-formed codes not on the list; `conditional` with a `reason` when the code is ambiguous without modifiers or cannot be recognised. The full table is in [9. The service list](09-service-list.md#what-each-rule-makes-the-api-say).
 - **Cards.** Every card carries `source.label` (`Plan:Name`) and `source.topic` (coverage-info), and its summary is cut to 139 characters.
 - **The two hooks.** `order-sign` is the primary hook. `order-select` is secondary: it never says documentation is needed, and it answers only the orders in `context.selections`.
 
@@ -665,6 +709,11 @@ flowchart TD
 | `Plan:Name` | `Behavioral Health Plan (synthetic)` | CRD cards | `source.label` on cards |
 | `AllowedHosts` | `localhost;127.0.0.1;[::1]` | host filtering | Set to the public host name in production. Not checked at start-up. |
 | `ServiceRequirements` | from `service-requirements.json` | `ServiceRequirementCatalog` | Array of services ([recipe 1](#1-add-or-change-a-service-that-needs-prior-authorization)) |
+| `Questionnaires` | from `service-requirements.json` | `ServiceRequirementCatalog` | Array of questionnaires that services share |
+| `StaffSignIn:Mode` | `Development` in Development, else `Windows` | `StaffSignIn.Mode` | `Development` outside the Development environment stops start-up |
+| `StaffSignIn:Groups:{Coordinator,LicensedClinician,Physician,Admin}` | empty | `WindowsGroupRoles` | AD group names, for example `COUNTY\PA-Clinicians`. Empty means no one has the role. |
+| `StaffSignIn:TestUsers` | five users (Development) | `/staff/dev-sign-in` | `Account`, `DisplayName`, `Roles` |
+| `DenialReasons` | five reasons | `DenialReasons` | `Code` and `Text` each; checked at start-up |
 | `Logging:*` | see appsettings | ASP.NET Core | EF command logging is at Warning |
 
 Environment variables use `__` in place of `:`. For example: `Auth__PublicBaseUrl=https://pa.example.gov`, `Database__Provider=SqlServer`, `ConnectionStrings__PriorAuth=...`.
@@ -688,15 +737,19 @@ tests/PriorAuth.Api.Tests/
 ├── SupportingDocumentTests.cs   documents and questionnaire answers
 ├── SignInTests.cs               token endpoint, keys, scopes, replay, deactivation
 ├── CrdAndDtrTests.cs            CDS Hooks and DTR operations
-├── ServerBoundaryTests.cs       internal guard, headers, negotiation, error bodies, /health
-└── DomainRuleTests.cs           no web server: catalog checks, matching, PlanClock, domain rules, mapper
+├── ServerBoundaryTests.cs       staff sign-in and roles at the edge, headers, negotiation, error bodies, /health
+├── PortalTests.cs               the portal's pages as each test user; roles from groups; Development-only sign-in
+├── StaffRuleTests.cs            no web server: who may claim, assign, release and decide
+├── ReviewRuleTests.cs           $submit outcome and review type for each review rule
+├── ServiceRuleTests.cs          no web server: service list matching, modifiers, list validation
+└── DomainRuleTests.cs           no web server: PlanClock, domain rules, mapper
 ```
 
 How the harness works:
 - **Each test class gets a fresh database.** `ApiFactory` is an `IClassFixture`. It points `ConnectionStrings:PriorAuth` at a new temp SQLite file, deleted on dispose.
 - **SQL Server.** Set `PRIORAUTH_TEST_SQLSERVER` to a server-only connection string, e.g. `Server=(localdb)\MSSQLLocalDB;Integrated Security=true`. The factory then creates a uniquely named database through the real migrations, and drops it on dispose.
-- **Remote address.** The in-memory test server has no remote address. The `TestRemoteAddress` startup filter sets it to loopback, or to whatever IP a test puts in `X-Test-Remote-Address`; this is how the guard tests look remote.
-- **Reviewer header.** The factory's default client already carries `X-Requested-By`, acting as the reviewer page.
+- **Staff sign-in.** The factory runs in Development, so it uses the test users. Every client from `factory.CreateClient()` is signed in as `DEV\test.reviewer` (all roles) and carries `X-Requested-By`. `factory.SignedInAs(ApiFactory.ClinicianAccount)` gives a client signed in as another test user; `factory.Anonymous()` gives one with no sign-in that does not follow redirects. The sign-in cookie is fetched through the real `/staff/dev-sign-in` on a separate client and sent as a default header, because `ConfigureClient` runs before a client may send anything.
+- **Portal pages.** `PortalTests` reads the anti-forgery token and the `Version` from the page's HTML and posts the form as a browser would.
 - **Signed-in clients.** A provider-side test does `var provider = await TestProvider.RegisterAsync(client); var http = await provider.SignInAsync(factory);`.
 
 Run them:
@@ -715,23 +768,38 @@ When you change what a valid PAS request is, change `PasFixtures.RequestBundle`,
 
 ### 1. Add or change a service that needs prior authorization
 
-Add an entry to the `ServiceRequirements` array in [service-requirements.json](../src/PriorAuth.Api/service-requirements.json):
+Add an entry to the `ServiceRequirements` array in [service-requirements.json](../src/PriorAuth.Api/service-requirements.json). A reviewed service names a questionnaire from the `Questionnaires` array; several services can share one.
 
 ```json
 {
   "System": "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets",
-  "Code": "H0032",
-  "Name": "Mental health service plan development",
-  "Program": "SMHS",
-  "Documentation": ["Current assessment"],
+  "Code": "H0019",
+  "Modifiers": ["U1"],
+  "Name": "ASAM level 3.1 clinically managed low-intensity residential treatment",
+  "Program": "DMC-ODS",
+  "Rule": "PriorAuthorization",
+  "Questionnaire": "dtr-dmcods-residential",
+  "CodeConfirmed": false,
+  "Source": "BHIN 24-001 p.9",
+  "Note": "Confirm the modifier against the DHCS billing manual."
+}
+```
+
+`Rule` is `PriorAuthorization`, `ConcurrentReview` or `NoPriorAuthorization`; the last never has a `Questionnaire`. A questionnaire looks like this:
+
+```json
+{
+  "Id": "dtr-dmcods-residential",
+  "Title": "DMC-ODS residential treatment",
+  "Status": "draft",
+  "Documentation": ["ASAM assessment or level of care screening"],
   "Questions": [
-    { "LinkId": "assessment-date", "Text": "Date of the most recent assessment", "Type": "date", "Required": true },
-    { "LinkId": "hours", "Text": "Requested hours per week", "Type": "choice", "Required": true, "Options": ["Up to 10", "11 to 20"] }
+    { "LinkId": "asam-level", "Text": "ASAM level of care requested", "Type": "choice", "Required": true, "Options": ["3.1", "3.3", "3.5"] }
   ]
 }
 ```
 
-Restart the service. If something is wrong, start-up fails with every problem listed. Changing a question's `LinkId`, or an option's text, changes what earlier answers mean: `OptionCode` is derived from the text. Bump `QuestionnaireBuilder.Version` when questions change in a way that matters. Versioned lists are not built yet (#1).
+Restart the service. If something is wrong, start-up fails with every problem listed. Changing a question's `LinkId`, or an option's text, changes what earlier answers mean: `OptionCode` is derived from the text. Bump `QuestionnaireBuilder.Version` when questions change in a way that matters. Versioned lists are not built yet (#1). Record where a rule comes from in `Source`, and update [9. The service list](09-service-list.md).
 
 ### 2. Add a FHIR endpoint
 
@@ -787,6 +855,7 @@ Add a `CdsService` entry, giving its id, hook, title and whether it is a primary
 7. **The SQLite schema is not upgraded.** After a model change, delete `src/PriorAuth.Api/priorauth.db`.
 8. **Running without the launch profile defaults to Production**, which requires `Auth:PublicBaseUrl`. Pass `--environment Development` after `--`.
 9. **The token signing key and the jti replay cache are per process.** A restart signs every client out, and more than one instance doesn't work yet (#14).
-10. **`LocalCallersOnly` is not authentication.** Don't run on a shared host (terminal server, Citrix), and don't put a same-machine proxy in front, until staff sign-in exists (#18).
-11. **Placeholder data.** `service-requirements.json` holds invented services (#1). Use only synthetic member data.
-12. **Not built:** PAS update and cancel (#28), subscriptions (deliberate), partial approvals (#24), priority and deadlines (#17), the PHI audit log (#19), US Core validation (#30). The full list is in [Status and open questions](04-status-and-open-questions.md) and the [audit report](07-audit-2026-11.md).
+10. **Windows sign-in needs Windows hosting.** Negotiate works under IIS (with Windows Authentication enabled and anonymous allowed for the provider endpoints) or Kestrel on a domain-joined machine. It cannot be tried on a Mac; there the Development test users stand in, and `RolesFromGroups` is what the tests cover.
+11. **Unconfirmed service list.** `service-requirements.json` follows the DHCS notices, but entries with `"CodeConfirmed": false` and every draft questionnaire still need the plan's confirmation (#1, [9. The service list](09-service-list.md)). Use only synthetic member data.
+12. **Modifiers matter.** Entries can share a code and differ by modifier (`H0019` with `U1`, `U2`, `U3`). PAS reads modifiers from `Claim.item.modifier`; CRD orders carry none, so CRD may answer `conditional`.
+13. **Not built:** PAS update and cancel (#28), subscriptions (deliberate), X12-coded partial approvals and denial reasons (#24), priority and deadlines (#17), the PHI audit log (#19), US Core validation (#30). The full list is in [Status and open questions](04-status-and-open-questions.md) and the [audit report](07-audit-2026-11.md).
