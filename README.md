@@ -53,15 +53,9 @@ Start the service. The reviewer queue is at http://localhost:5020:
 dotnet run --project src/PriorAuth.Api --no-launch-profile -- --urls http://localhost:5020 --environment Development
 ```
 
-In a second terminal, act as a provider's system. It asks about an order, downloads the questionnaire, submits a request with answers and a document, then waits for you to decide it in the queue:
-
-```bash
-dotnet run --project samples/PriorAuth.SampleClient -- http://localhost:5020
-```
-
 ### Demo for management
 
-The clinic demo shows the same journey in a browser, in plain words, for people who are not developers. Every step is a real call to the service; only the clinic, the member and the suggested answers are made up. With the service running as above, start it in a second terminal and open http://localhost:5030:
+The clinic demo acts as a provider's system: it asks about an order, downloads the questionnaire, submits a request with answers and a document, and waits for the decision. It shows each step in a browser, in plain words, so it also works for people who are not developers. Every step is a real call to the service; only the clinic, the member and the suggested answers are made up. With the service running as above, start it in a second terminal and open http://localhost:5030:
 
 ```bash
 dotnet run --project samples/PriorAuth.ClinicDemo
@@ -151,7 +145,6 @@ For developers of provider systems, the running service also serves a guide at `
 |---|---|
 | [src/PriorAuth.Api](src/PriorAuth.Api) | The service |
 | [tests/PriorAuth.Api.Tests](tests/PriorAuth.Api.Tests) | 190 automated tests, almost all starting the real app; they run on SQLite or SQL Server |
-| [samples/PriorAuth.SampleClient](samples/PriorAuth.SampleClient) | A sample provider client |
 | [samples/PriorAuth.ClinicDemo](samples/PriorAuth.ClinicDemo) | A browser demo of one request, in plain words, for management |
 | [docs](docs) | Documentation, diagrams and screenshots |
 

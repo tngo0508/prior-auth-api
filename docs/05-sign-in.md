@@ -116,13 +116,13 @@ It is for trying the flow by hand, never for a real provider. A key made by the 
 
 ## Try it
 
-With the service running:
+With the service running, start the clinic demo and open http://localhost:5030:
 
 ```bash
-dotnet run --project samples/PriorAuth.SampleClient -- http://localhost:5020
+dotnet run --project samples/PriorAuth.ClinicDemo
 ```
 
-[The sample client](../samples/PriorAuth.SampleClient/Program.cs) creates a key pair, registers, signs in, checks the requirements, submits a request, waits for you to decide it in the staff portal, and asks for the status. It is about 120 lines and is the reference for a provider's developer.
+It creates a key pair, registers, signs in, checks the requirements, submits a request, and asks for the status until you decide it in the staff portal. The provider side is in [PlanConnection.cs](../samples/PriorAuth.ClinicDemo/PlanConnection.cs), the reference for a provider's developer. To register by hand instead, use **Generate a test key** on the Provider systems page (above).
 
 ## Limits to know about
 
