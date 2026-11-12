@@ -200,11 +200,18 @@ public static class FhirEndpoints
                     new CapabilityStatement.ResourceComponent
                     {
                         Type = "Questionnaire",
+                        SupportedProfile = ["http://hl7.org/fhir/us/davinci-dtr/StructureDefinition/dtr-std-questionnaire"],
                         Interaction = [new() { Code = CapabilityStatement.TypeRestfulInteraction.Read }],
                         Operation =
                         [
                             new() { Name = "questionnaire-package", Definition = "http://hl7.org/fhir/us/davinci-dtr/OperationDefinition/questionnaire-package" },
+                            new() { Name = "log-questionnaire-errors", Definition = "http://hl7.org/fhir/us/davinci-dtr/OperationDefinition/log-questionnaire-errors" },
                         ],
+                    },
+                    new CapabilityStatement.ResourceComponent
+                    {
+                        Type = "ValueSet",
+                        Operation = [new() { Name = "expand", Definition = "http://hl7.org/fhir/OperationDefinition/ValueSet-expand" }],
                     },
                 ],
             },

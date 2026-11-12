@@ -59,12 +59,20 @@ namespace PriorAuth.Api.Data.Migrations
 
                     b.Property<string>("ClientId")
                         .IsRequired()
-                        .HasColumnType("nvarchar(450)");
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)")
+                        .UseCollation("Latin1_General_100_BIN2");
 
                     b.Property<DateTime?>("DecidedAtUtc")
                         .HasColumnType("datetime2");
 
                     b.Property<string>("DecidedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("LastChangedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("MemberIdentifier")
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("MemberName")
@@ -77,7 +85,15 @@ namespace PriorAuth.Api.Data.Migrations
 
                     b.Property<string>("ProviderRequestId")
                         .IsRequired()
-                        .HasColumnType("nvarchar(450)");
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)")
+                        .UseCollation("Latin1_General_100_BIN2");
+
+                    b.Property<string>("ProviderRequestSystem")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)")
+                        .UseCollation("Latin1_General_100_BIN2");
 
                     b.Property<string>("Reason")
                         .HasColumnType("nvarchar(max)");
@@ -93,17 +109,28 @@ namespace PriorAuth.Api.Data.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<string>("Status")
+                    b.Property<string>("ServiceSystem")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
 
                     b.Property<string>("SubmittedBundleJson")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("ClientId", "ProviderRequestId")
+                    b.HasIndex("Status", "ReceivedAtUtc");
+
+                    b.HasIndex("ClientId", "ProviderRequestSystem", "ProviderRequestId")
                         .IsUnique();
 
                     b.ToTable("AuthorizationRequests");
@@ -136,7 +163,38 @@ namespace PriorAuth.Api.Data.Migrations
 
                     b.HasIndex("AuthorizationRequestId");
 
-                    b.ToTable("HistoryEntry");
+                    b.ToTable("HistoryEntry", (string)null);
+                });
+
+            modelBuilder.Entity("PriorAuth.Api.Domain.ReceivedBundle", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AuthorizationRequestId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("Json")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("ReceivedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AuthorizationRequestId");
+
+                    b.ToTable("ReceivedBundle");
                 });
 
             modelBuilder.Entity("PriorAuth.Api.Domain.SupportingDocument", b =>
@@ -158,6 +216,11 @@ namespace PriorAuth.Api.Data.Migrations
 
                     b.Property<DateTime>("ReceivedAtUtc")
                         .HasColumnType("datetime2");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<int>("SizeBytes")
                         .HasColumnType("int");
@@ -182,6 +245,15 @@ namespace PriorAuth.Api.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("PriorAuth.Api.Domain.ReceivedBundle", b =>
+                {
+                    b.HasOne("PriorAuth.Api.Domain.AuthorizationRequest", null)
+                        .WithMany("Resubmissions")
+                        .HasForeignKey("AuthorizationRequestId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("PriorAuth.Api.Domain.SupportingDocument", b =>
                 {
                     b.HasOne("PriorAuth.Api.Domain.AuthorizationRequest", null)
@@ -196,6 +268,8 @@ namespace PriorAuth.Api.Data.Migrations
                     b.Navigation("Documents");
 
                     b.Navigation("History");
+
+                    b.Navigation("Resubmissions");
                 });
 #pragma warning restore 612, 618
         }

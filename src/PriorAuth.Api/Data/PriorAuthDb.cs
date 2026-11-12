@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PriorAuth.Api.Auth;
 using PriorAuth.Api.Domain;
@@ -43,7 +43,6 @@ public class PriorAuthDb(DbContextOptions<PriorAuthDb> options) : DbContext(opti
 
         var request = model.Entity<AuthorizationRequest>();
         request.HasKey(r => r.Id);
-        request.Property(r => r.Id).HasMaxLength(64);
         Exact(request.Property(r => r.ClientId).HasMaxLength(64));
         Exact(request.Property(r => r.ProviderRequestSystem).HasMaxLength(MaxIdentifierLength));
         Exact(request.Property(r => r.ProviderRequestId).HasMaxLength(MaxIdentifierLength));
@@ -62,7 +61,6 @@ public class PriorAuthDb(DbContextOptions<PriorAuthDb> options) : DbContext(opti
 
         var document = model.Entity<SupportingDocument>();
         document.HasKey(d => d.Id);
-        document.Property(d => d.Id).HasMaxLength(64);
         document.Property(d => d.Title);
         document.Property(d => d.ContentType);
         document.Property(d => d.Data);
@@ -70,7 +68,7 @@ public class PriorAuthDb(DbContextOptions<PriorAuthDb> options) : DbContext(opti
         document.Property(d => d.Sha256).HasMaxLength(64);
         document.Property(d => d.ReceivedAtUtc);
 
-        var history = model.Entity<HistoryEntry>();
+        var history = model.Entity<HistoryEntry>().ToTable("HistoryEntry");
         history.HasKey(h => h.Id);
         history.Property(h => h.AtUtc);
         history.Property(h => h.Actor);
