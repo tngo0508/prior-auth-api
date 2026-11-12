@@ -75,7 +75,7 @@ If a command fails with "address already in use" or "file is locked", a copy is 
 
 ## Documentation
 
-Start with the architecture overview for the whole system on one page, then the guides in order.
+Start with the architecture overview for the whole system on one page, then the guides in order. Developers changing the code should read the codebase guide (8) next.
 
 | Document | What it covers |
 |---|---|
@@ -87,6 +87,7 @@ Start with the architecture overview for the whole system on one page, then the 
 | [5. Sign-in for provider systems](docs/05-sign-in.md) | How a provider's system proves who it is |
 | [6. Asking first: CRD and DTR](docs/06-crd-and-dtr.md) | How an EHR learns that approval is needed and what to send |
 | [7. November 2026 audit](docs/07-audit-2026-11.md) | What the audit against the CMS workflow found, and what was fixed |
+| [8. Codebase guide for developers](docs/08-codebase-guide.md) | Start-up, pipeline, every endpoint and class, data mapping, sign-in and CRD/DTR internals, tests, recipes and traps |
 | [GLOSSARY.md](GLOSSARY.md) | The project's business terms |
 
 For developers of provider systems, the running service also serves a guide at `/developers.html`.
