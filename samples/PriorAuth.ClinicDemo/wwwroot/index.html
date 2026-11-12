@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sunrise Youth Clinic: prior authorization demo</title>
+<title>Sunrise Clinic: prior authorization demo</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
@@ -93,6 +93,23 @@
   table.form th, table.form td { text-align: left; vertical-align: top; padding: .55rem .75rem .55rem 0; border-bottom: 1px solid var(--rule); }
   table.form th { font-weight: 400; color: var(--ink-soft); width: 55%; }
   table.form td { font-weight: 700; }
+  .form-grid { display: grid; gap: 1rem; max-width: 52rem; margin-top: .9rem; }
+  .question label, .question legend { display: block; color: var(--ink-soft); margin-bottom: .3rem; padding: 0; }
+  .question fieldset { border: 0; margin: 0; padding: 0; }
+  .question .required { color: var(--no); }
+  .question input[type=text], .question input[type=date], .question select, .question textarea {
+    font: inherit; font-weight: 700; color: var(--ink); width: 100%; padding: .5rem .65rem;
+    border: 2px solid var(--rule); border-radius: .4rem; background: var(--panel);
+  }
+  .question input[type=date] { width: auto; }
+  .question textarea { min-height: 3.2rem; resize: vertical; }
+  .question input:focus-visible, .question select:focus-visible, .question textarea:focus-visible { outline: 3px solid var(--sun); outline-offset: 1px; }
+  .question .choices { display: flex; gap: 1.5rem; }
+  .question .choices label { display: inline-flex; gap: .4rem; align-items: center; color: var(--ink); font-weight: 700; margin: 0; }
+  .question.missing input, .question.missing select, .question.missing textarea { border-color: var(--no); }
+  .question .problem { color: var(--no); font-size: .95rem; margin: .25rem 0 0; }
+  .order select { font: inherit; font-weight: 700; color: var(--ink); width: 100%; padding: .45rem .5rem; border: 2px solid var(--rule); border-radius: .4rem; background: var(--panel); }
+  .send-problem { color: var(--no); font-weight: 700; margin: .6rem 0 0; }
   .attached { margin: .75rem 0 0; }
 
   details { margin-top: .9rem; font-size: .95rem; }
@@ -108,7 +125,7 @@
 <body>
 <header>
   <div>
-    <h1>Sunrise Youth Clinic</h1>
+    <h1>Sunrise Clinic</h1>
     <p>A pretend clinic system asking the county plan for approval. Synthetic data only.</p>
   </div>
   <button class="quiet" id="restart" type="button">Start again</button>
@@ -118,12 +135,11 @@
   <aside class="order" aria-label="The order">
     <h2>Today's order</h2>
     <dl>
-      <div><dt>Member</dt><dd>Alex Testpatient, 14</dd></div>
-      <div><dt>Service</dt><dd>Therapeutic behavioral services (TBS)</dd></div>
-      <div><dt>Amount</dt><dd>10 hours a week for 12 weeks</dd></div>
+      <div><dt>Member</dt><dd>Alex Testpatient</dd></div>
+      <div><dt><label for="service">Service</label></dt><dd><select id="service"><option>Loading the plan's list…</option></select></dd></div>
       <div><dt>Plan</dt><dd>County Behavioral Health Plan</dd></div>
     </dl>
-    <p class="note">TBS is one of the services the plan must approve before it starts.</p>
+    <p class="note" id="service-note">Pick any service on the plan's list. Changing it starts a new request.</p>
   </aside>
 
   <ol class="steps">
@@ -135,7 +151,7 @@
     </li>
     <li class="step locked" id="step-2">
       <h3>The clinic fills in the plan's form</h3>
-      <p class="who">The plan says what it needs to decide. The clinic's system fills in what it already knows from the record.</p>
+      <p class="who">The plan says what it needs to decide. The clinic's system fills in what it knows from the record; change any answer before sending.</p>
       <button type="button" id="form" disabled>Get the plan's form</button>
       <div class="answer" id="answer-2" hidden aria-live="polite"></div>
     </li>
@@ -157,11 +173,14 @@
   const $ = id => document.getElementById(id);
   let reviewerPage = "http://localhost:5020/";
   let polling = null;
+  let questions = [];
 
   fetch("/demo/setup").then(r => r.json()).then(s => { reviewerPage = s.reviewerPage; }).catch(() => {});
 
   function el(tag, props = {}, ...children) {
-    const node = Object.assign(document.createElement(tag), props);
+    const { dataset, ...rest } = props;
+    const node = Object.assign(document.createElement(tag), rest);
+    if (dataset) Object.assign(node.dataset, dataset);
     for (const child of children) if (child != null) node.append(child);
     return node;
   }
@@ -182,19 +201,19 @@
     box.hidden = false;
   }
 
+  // n is the step in progress; skipped steps are shown as done.
   function stage(n) {
-    for (let i = 1; i <= 4; i++) {
-      const step = $(`step-${i}`);
-      step.className = "step " + (i < n ? "done" : i === n ? "current" : "locked");
-    }
+    for (let i = 1; i <= 4; i++) $(`step-${i}`).className = "step " + (i < n ? "done" : i === n ? "current" : "locked");
     $("check").disabled = n !== 1;
     $("form").disabled = n !== 2;
     $("send").disabled = n !== 3;
   }
 
-  async function call(path) {
+  async function call(path, body) {
     try {
-      const response = await fetch(path, { method: "POST" });
+      const response = await fetch(path, body === undefined
+        ? { method: "POST" }
+        : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       return await response.json();
     } catch {
       return { ok: false, headline: "The clinic demo is not running. Start it and reload this page." };
@@ -205,46 +224,153 @@
     show(n, "error", result.headline, [technical(result.technical)]);
   }
 
+  function clearStory() {
+    clearInterval(polling); polling = null;
+    questions = [];
+    for (let i = 1; i <= 4; i++) $(`answer-${i}`).hidden = true;
+    stage(1);
+  }
+
+  // ---- The service picker, filled from the plan's published list.
+
+  async function loadServices() {
+    let r;
+    try { r = await (await fetch("/demo/services")).json(); }
+    catch { r = { ok: false, headline: "The clinic demo is not running. Start it and reload this page." }; }
+    const select = $("service");
+    if (!r.ok) {
+      select.replaceChildren(el("option", { textContent: "The plan's list is not available" }));
+      $("service-note").textContent = r.headline;
+      return;
+    }
+    const groups = {};
+    for (const s of r.services) (groups[s.program] ??= []).push(s);
+    select.replaceChildren(...Object.entries(groups).map(([program, list]) =>
+      el("optgroup", { label: program === "DMC-ODS" ? "Substance use (DMC-ODS)" : "Mental health (SMHS)" },
+        ...list.map(s => el("option", { value: s.id, textContent: s.name, selected: s.id === r.selected })))));
+    $("service-note").textContent = "Pick any service on the plan's list. Changing it starts a new request.";
+  }
+
+  $("service").addEventListener("change", async event => {
+    clearStory();
+    const r = await call("/demo/service", { id: event.target.value });
+    if (!r.ok) failed(1, r);
+  });
+
+  // ---- Step 1: check with the plan.
+
   $("check").addEventListener("click", async () => {
     $("check").disabled = true;
     const r = await call("/demo/check");
     if (!r.ok) { $("check").disabled = false; return failed(1, r); }
     const took = r.elapsedMs < 1000 ? "in under a second" : `in ${(r.elapsedMs / 1000).toFixed(1)} seconds`;
-    show(1, r.approvalNeeded ? "attention" : "yes", r.headline, [
+    show(1, r.tone, r.headline, [
       el("p", { className: "speed", textContent: `The plan answered ${took}, while the clinician was still signing.` }),
       r.detail ? el("p", { className: "detail", textContent: r.detail }) : null,
       technical(r.technical),
     ]);
-    if (r.approvalNeeded) stage(2);
+    if (r.hasForm) { stage(2); return; }
+    show(2, "form-answer", "The plan has no form for this service", [
+      el("p", { className: "detail", textContent: "You can still send a request, to see what the plan answers." }),
+    ]);
+    stage(3);
   });
+
+  // ---- Step 2: the plan's form, editable.
+
+  function input(q) {
+    const id = `q-${q.linkId}`;
+    const mark = q.required ? el("span", { className: "required", textContent: " (required)" }) : null;
+    let control;
+    if (q.type === "boolean") {
+      const radio = (value, text) => el("label", {},
+        el("input", { type: "radio", name: id, value, checked: q.answer === (value === "yes") && q.answer !== null }), text);
+      return el("div", { className: "question", dataset: { link: q.linkId } },
+        el("fieldset", {}, el("legend", {}, q.text, mark), el("div", { className: "choices" }, radio("yes", "Yes"), radio("no", "No"))));
+    }
+    if (q.type === "choice") {
+      control = el("select", { id }, el("option", { value: "", textContent: "Choose…" }),
+        ...q.options.map(o => el("option", { value: o.code, textContent: o.display, selected: o.code === q.answer })));
+    } else if (q.type === "date") {
+      control = el("input", { id, type: "date", value: q.answer ?? "" });
+    } else if (q.type === "text") {
+      control = el("textarea", { id, value: q.answer ?? "", rows: 2 });
+    } else {
+      control = el("input", { id, type: "text", value: q.answer ?? "" });
+    }
+    return el("div", { className: "question", dataset: { link: q.linkId } }, el("label", { htmlFor: id }, q.text, mark), control);
+  }
+
+  function readAnswers() {
+    const answers = {};
+    for (const q of questions) {
+      const id = `q-${q.linkId}`;
+      if (q.type === "boolean") {
+        const picked = document.querySelector(`input[name="${id}"]:checked`);
+        if (picked) answers[q.linkId] = picked.value === "yes";
+      } else {
+        const value = $(id).value.trim();
+        if (value) answers[q.linkId] = value;
+      }
+    }
+    return answers;
+  }
 
   $("form").addEventListener("click", async () => {
     $("form").disabled = true;
     const r = await call("/demo/form");
     if (!r.ok) { $("form").disabled = false; return failed(2, r); }
-    const rows = r.questions.map(q => el("tr", {}, el("th", { scope: "row", textContent: q.text }), el("td", { textContent: q.answer })));
+    questions = r.questions;
     show(2, "form-answer", r.headline, [
       r.detail ? el("p", { className: "detail", textContent: r.detail }) : null,
-      el("table", { className: "form" }, el("tbody", {}, ...rows)),
+      el("div", { className: "form-grid" }, ...questions.map(input)),
       el("p", { className: "attached", textContent: `Attached: ${r.documents.join(", ")}` }),
       technical(r.technical),
     ]);
     stage(3);
   });
 
+  // ---- Step 3: send what is on screen.
+
   $("send").addEventListener("click", async () => {
+    $("answer-3").hidden = true;
+    for (const node of document.querySelectorAll(".question")) {
+      node.classList.remove("missing");
+      node.querySelector(".problem")?.remove();
+    }
+    const answers = readAnswers();
+    const missing = questions.filter(q => q.required && !(q.linkId in answers));
+    if (missing.length) {
+      for (const q of missing) {
+        const node = document.querySelector(`.question[data-link="${q.linkId}"]`);
+        node.classList.add("missing");
+        node.append(el("p", { className: "problem", textContent: "Answer this question before sending." }));
+      }
+      show(3, "error", `Answer the ${missing.length === 1 ? "required question" : `${missing.length} required questions`} first`);
+      return;
+    }
     $("send").disabled = true;
-    const r = await call("/demo/send");
-    if (!r.ok) { $("send").disabled = false; return failed(3, r); }
+    for (const control of document.querySelectorAll(".question input, .question select, .question textarea")) control.disabled = true;
+    const r = await call("/demo/send", { answers: questions.length ? answers : null });
+    if (!r.ok) {
+      $("send").disabled = false;
+      for (const control of document.querySelectorAll(".question input, .question select, .question textarea")) control.disabled = false;
+      return failed(3, r);
+    }
+    const queued = r.status === "pended" || r.status === "info";
     show(3, "yes", "Sent", [
-      el("p", { className: "detail", textContent: `The plan received request ${r.requestNumber} and put it in its review queue.` }),
-      el("p", { className: "detail" }, el("a", { href: reviewerPage, target: "_blank", rel: "noopener", textContent: "Open the plan's reviewer page" }), " to approve or deny it."),
+      el("p", { className: "detail", textContent: queued
+        ? `The plan received request ${r.requestNumber} and put it in its review queue.`
+        : `The plan received request ${r.requestNumber} and answered at once.` }),
+      queued ? el("p", { className: "detail" }, el("a", { href: reviewerPage, target: "_blank", rel: "noopener", textContent: "Open the plan's reviewer page" }), " to approve or deny it.") : null,
       technical(r.technical),
     ]);
     stage(4);
     decision(r);
-    polling = setInterval(checkBack, 4000);
+    if (queued) polling = setInterval(checkBack, 4000);
   });
+
+  // ---- Step 4: the decision.
 
   async function checkBack() {
     const r = await call("/demo/status");
@@ -268,11 +394,11 @@
   }
 
   $("restart").addEventListener("click", async () => {
-    clearInterval(polling); polling = null;
+    clearStory();
     await call("/demo/reset");
-    for (let i = 1; i <= 4; i++) $(`answer-${i}`).hidden = true;
-    stage(1);
   });
+
+  loadServices();
 </script>
 </body>
 </html>

@@ -61,19 +61,61 @@ dotnet run --project samples/PriorAuth.SampleClient -- http://localhost:5020
 
 ### Demo for management
 
-The clinic demo shows the same journey in a browser, in plain words, for people who are not developers. With the service running as above, start it in a second terminal and open http://localhost:5030:
+The clinic demo shows the same journey in a browser, in plain words, for people who are not developers. Every step is a real call to the service; only the clinic, the member and the suggested answers are made up. With the service running as above, start it in a second terminal and open http://localhost:5030:
 
 ```bash
 dotnet run --project samples/PriorAuth.ClinicDemo
 ```
 
 1. Put the clinic demo and the reviewer queue (http://localhost:5020) side by side.
-2. **Check with the plan.** The plan answers "Approval needed" for therapeutic behavioral services (TBS) in under a second.
-3. **Get the plan's form.** The plan's questions appear, already answered from the clinic's record.
-4. **Send the request.** It appears in the reviewer queue.
-5. In the queue, enter a reviewer name and an end date, and approve it (or deny it with a reason). Within a few seconds the clinic demo shows the decision and the authorization number.
+2. **Pick a service** from the plan's list on the left. Therapeutic behavioral services (TBS) is a good first run: it needs approval.
+3. **Check with the plan.** The plan answers in under a second whether approval is needed.
+4. **Get the plan's form.** The plan's questions appear, filled in from the clinic's pretend record. Change any answer; a required question left blank stops the request until it is answered.
+5. **Send the request.** It appears in the reviewer queue, with the answers exactly as sent.
+6. In the queue, enter a reviewer name and an end date, and approve it (or deny it with a reason). Within a few seconds the clinic demo shows the decision and the authorization number.
+
+Other services show the plan's other rules:
+
+| Pick | What the audience sees |
+|---|---|
+| Crisis residential treatment | No approval needed, and the plan may not require it. No form. A request sent anyway is answered at once. |
+| Acute psychiatric inpatient | No approval beforehand: the stay is reviewed after admission. The admission and the plan's form still go to the review queue. |
+| ASAM 3.1 residential | The order check needs a person, because an order cannot carry the billing modifier that names the level. The request, which does carry it, goes to review. |
+| Adult residential treatment | Held for a person, because its code is shared with the DMC-ODS residential levels. |
 
 **Start again** begins a new request. Each step has a closed "Technical detail" section for questions about what was sent. The demo must run on the same machine as the service, because it registers itself as a provider system the way agency staff would.
+
+#### Running the demo on a demo server
+
+The reviewer queue only answers a browser on its own machine, and the demo registers itself with the service the same way. So run both on the demo server and present from that server's own desktop (signed in at the console or over Remote Desktop), with the browser pointed at `localhost`. Do not use a shared host such as a terminal server or Citrix: every signed-in user there counts as local.
+
+1. **Install the .NET 10 SDK** on the server, then get the code onto it, from git or a copied folder:
+
+   ```powershell
+   git clone https://github.com/tngo0508/prior-auth-api.git
+   cd prior-auth-api
+   ```
+
+   To check out work that is not merged yet, add `git checkout <branch>`.
+
+2. **Start the service** in one window. It runs in Development mode, which is correct for a demo: synthetic data, a local SQLite file, and no https address to configure. Delete the old database first so the demo starts empty and on the current data model:
+
+   ```powershell
+   Remove-Item src/PriorAuth.Api/priorauth.db -ErrorAction SilentlyContinue
+   dotnet run --project src/PriorAuth.Api --no-launch-profile -- --urls http://localhost:5020 --environment Development
+   ```
+
+3. **Start the clinic demo** in a second window:
+
+   ```powershell
+   dotnet run --project samples/PriorAuth.ClinicDemo
+   ```
+
+4. **Open two browser windows on the server**, side by side: http://localhost:5030 (the clinic) and http://localhost:5020 (the reviewer queue). Follow the script above.
+
+To use other ports, pass `--urls` to either app and point the demo at the service with `--PlanApi`, for example `dotnet run --project samples/PriorAuth.ClinicDemo -- --urls http://localhost:6030 --PlanApi http://localhost:6020`.
+
+Before each audience, stop the service, delete `src/PriorAuth.Api/priorauth.db`, and start it again to clear earlier requests. Restart the clinic demo too, or press **Start again**.
 
 Run the tests:
 
