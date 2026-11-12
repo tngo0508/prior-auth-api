@@ -1,6 +1,12 @@
 @page "/providers"
 @model PriorAuth.Api.Pages.Providers.IndexModel
-@{ ViewData["Title"] = "Provider systems"; }
+@inject IConfiguration Config
+@inject IWebHostEnvironment Environment
+@{
+    ViewData["Title"] = "Provider systems";
+    // Test keys are offered only with the Development test sign-in, which the app refuses to start anywhere else.
+    var testKeys = StaffSignIn.Mode(Config, Environment) == StaffSignInMode.Development;
+}
 <h1>Provider systems</h1>
 <p class="lede">Each provider's software signs in with its own key. Register a system only after checking who the provider is.</p>
 
@@ -42,6 +48,53 @@ else
 <form method="post" asp-page-handler="Register" class="card">
   <div class="field"><label for="name">Provider name</label><input id="name" type="text" asp-for="Name" required></div>
   <div class="field"><label for="email">Contact email <span class="muted">(optional)</span></label><input id="email" type="text" asp-for="ContactEmail" placeholder="Where to tell them a request needs attention"></div>
-  <div class="field"><label for="jwks">Public keys (JSON Web Key Set)</label><textarea id="jwks" asp-for="Jwks" required placeholder='{"keys": [ ... ]}'></textarea></div>
-  <button class="btn primary" type="submit">Register</button>
+  <div class="field">
+    <label for="jwks">Public keys (JSON Web Key Set)</label>
+    <span class="muted">Paste the key set the provider's developer sent you. It starts with {"keys": [ and never holds a private key.</span>
+    <textarea id="jwks" asp-for="Jwks" required placeholder='{"keys": [ ... ]}'></textarea>
+  </div>
+  @if (testKeys)
+  {
+    <div class="test-key">
+      <div class="row">
+        <button class="btn" type="button" id="make-test-key">Generate a test key</button>
+        <span class="muted">Development only. Made in this browser; the server never sees the private key.</span>
+      </div>
+      <div class="notice" id="test-key-result" role="status" hidden>
+        <p id="test-key-text"></p>
+        <a class="btn" id="test-key-save" download>Save the private key</a>
+        <p class="muted">Save it now: it is not kept anywhere else. For testing only. A real provider makes its own key and sends you only the public part.</p>
+      </div>
+    </div>
+    <script>
+      // A test key whose private half was never saved cannot be used, and it is gone once the page reloads.
+      let unsaved = false;
+      document.getElementById("test-key-save").addEventListener("click", () => { unsaved = false; });
+      document.getElementById("make-test-key").closest("form").addEventListener("submit", event => {
+        if (unsaved && !confirm("You have not saved the test key's private key. Without it the test system cannot sign in. Register anyway?")) event.preventDefault();
+      });
+      document.getElementById("make-test-key").addEventListener("click", async () => {
+        const result = document.getElementById("test-key-result"), text = document.getElementById("test-key-text");
+        result.hidden = false;
+        if (!window.crypto || !window.crypto.subtle) {
+          text.textContent = "This browser can only make keys on a secure page. Open the portal at http://localhost or over https.";
+          return;
+        }
+        const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-384" }, true, ["sign", "verify"]);
+        const pub = await crypto.subtle.exportKey("jwk", pair.publicKey), priv = await crypto.subtle.exportKey("jwk", pair.privateKey);
+        const kid = "test-" + new Date().toISOString().slice(0, 10) + "-" + crypto.getRandomValues(new Uint32Array(1))[0].toString(16);
+        const publicKey = { kty: "EC", crv: "P-384", x: pub.x, y: pub.y, kid, use: "sig", alg: "ES384" };
+        document.getElementById("jwks").value = JSON.stringify({ keys: [publicKey] }, null, 2);
+        const privateKey = { ...publicKey, d: priv.d };
+        const name = (document.getElementById("name").value.trim() || "test-provider").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase();
+        const save = document.getElementById("test-key-save");
+        if (save.href) URL.revokeObjectURL(save.href);
+        save.href = URL.createObjectURL(new Blob([JSON.stringify(privateKey, null, 2)], { type: "application/json" }));
+        save.download = name + "-private-key.json";
+        unsaved = true;
+        text.textContent = "Test key " + kid + " made. Its public part is in the box above; register to get the client ID.";
+      });
+    </script>
+  }
+  <button class="btn primary spaced-sm" type="submit">Register</button>
 </form>
