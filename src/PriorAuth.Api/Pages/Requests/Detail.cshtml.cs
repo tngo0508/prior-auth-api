@@ -16,8 +16,14 @@ public class DetailModel(PriorAuthDb db, PlanClock clock, ReviewDesk desk, Denia
     public string Program { get; private set; } = "";
     public IReadOnlyList<Staff> Assignable { get; private set; } = [];
 
-    /// <summary>A document as the page lists it. The file itself is only read when someone downloads it.</summary>
-    public record DocumentRow(string Id, string Title, string ContentType, int SizeBytes, DateTime ReceivedAtUtc);
+    /// <summary>
+    /// A document as the page lists it. Short plain-text documents (questionnaire answers, notes) are shown on the page,
+    /// so the reviewer reads them beside the decision; anything else is only read when someone downloads it.
+    /// </summary>
+    public record DocumentRow(string Id, string Title, string ContentType, int SizeBytes, DateTime ReceivedAtUtc, string? Text = null);
+
+    /// <summary>The largest plain-text document shown on the page. Longer ones are a download.</summary>
+    public const int MaxShownTextBytes = 16 * 1024;
     public IReadOnlyList<DocumentRow> Documents { get; private set; } = [];
     public IReadOnlyList<DenialReason> DenialReasons => reasons.All;
     public PlanClock Clock => clock;
@@ -86,8 +92,16 @@ public class DetailModel(PriorAuthDb db, PlanClock clock, ReviewDesk desk, Denia
         Documents = await db.SupportingDocuments.AsNoTracking()
             .Where(d => EF.Property<string>(d, "AuthorizationRequestId") == id)
             .OrderBy(d => d.ReceivedAtUtc)
-            .Select(d => new DocumentRow(d.Id, d.Title, d.ContentType, d.SizeBytes, d.ReceivedAtUtc))
+            .Select(d => new DocumentRow(d.Id, d.Title, d.ContentType, d.SizeBytes, d.ReceivedAtUtc, null))
             .ToListAsync();
+        var shown = Documents.Where(d => d.SizeBytes <= MaxShownTextBytes && d.ContentType.StartsWith("text/plain", StringComparison.OrdinalIgnoreCase))
+            .Select(d => d.Id).ToList();
+        if (shown.Count > 0)
+        {
+            var texts = await db.SupportingDocuments.AsNoTracking().Where(d => shown.Contains(d.Id))
+                .Select(d => new { d.Id, d.Data }).ToDictionaryAsync(d => d.Id, d => System.Text.Encoding.UTF8.GetString(d.Data));
+            Documents = Documents.Select(d => texts.TryGetValue(d.Id, out var text) ? d with { Text = text } : d).ToList();
+        }
         Version = request.Version;
         Program = IndexModel.ProgramOf(catalog, request.ServiceSystem, request.ServiceCode);
         if (request.MayBeAssignedBy(Me))
@@ -95,6 +109,9 @@ public class DetailModel(PriorAuthDb db, PlanClock clock, ReviewDesk desk, Denia
                 .Select(m => m.AsStaff()).Where(s => s.WorksQueue).ToList();
         return true;
     }
+
+    /// <summary>How long ago, in plain words: "just now", "3 hours ago".</summary>
+    public string Ago(DateTime utc) => IndexModel.Ago(clock.UtcNow - utc);
 
     public string Local(DateTime utc) => clock.LocalTime(utc).ToString("d MMM yyyy, h:mm tt");
 

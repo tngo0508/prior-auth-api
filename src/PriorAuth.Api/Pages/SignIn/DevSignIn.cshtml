@@ -9,7 +9,7 @@
   <form method="post" action="/staff/dev-sign-in" class="card row">
     <input type="hidden" name="account" value="@user.Account">
     <input type="hidden" name="returnUrl" value="@Model.ReturnUrl">
-    <button type="submit">Sign in as @user.DisplayName</button>
+    <button class="btn primary" type="submit">Sign in as @user.DisplayName</button>
     <span class="muted">@user.Account · @string.Join(", ", user.Roles.Order().Select(r => r.Describe()))</span>
   </form>
 }

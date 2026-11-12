@@ -2,14 +2,15 @@
 @model PriorAuth.Api.Pages.Providers.IndexModel
 @{ ViewData["Title"] = "Provider systems"; }
 <h1>Provider systems</h1>
-<p class="muted">Each provider's software signs in with its own key. Register a system only after checking who the provider is.</p>
+<p class="lede">Each provider's software signs in with its own key. Register a system only after checking who the provider is.</p>
 
 @if (Model.Notice is not null) { <div class="notice" role="status">@Model.Notice</div> }
 @if (Model.Problem is not null) { <div class="problem" role="alert">@Model.Problem</div> }
 
-@if (Model.Clients.Count == 0) { <p>No provider systems are registered yet.</p> }
+@if (Model.Clients.Count == 0) { <p class="card empty">No provider systems are registered yet.</p> }
 else
 {
+  <div class="card table-card whole">
   <table>
     <thead><tr><th>Provider</th><th>Client ID</th><th class="hide-narrow">Contact</th><th class="hide-narrow">Registered</th><th>State</th><th></th></tr></thead>
     <tbody>
@@ -26,7 +27,7 @@ else
           {
             <form method="post" asp-page-handler="Deactivate" asp-route-clientId="@c.ClientId"
                   onsubmit="return confirm('Switch off @c.Name? Its system will no longer be able to sign in.')">
-              <button type="submit">Switch off</button>
+              <button class="btn" type="submit">Switch off</button>
             </form>
           }
         </td>
@@ -34,13 +35,13 @@ else
     }
     </tbody>
   </table>
+  </div>
 }
 
-<h2>Register a provider system</h2>
+<h2 class="spaced">Register a provider system</h2>
 <form method="post" asp-page-handler="Register" class="card">
-  <div class="row"><label for="name">Provider name</label><input id="name" type="text" asp-for="Name" required></div>
-  <div class="row"><label for="email">Contact email</label><input id="email" type="text" asp-for="ContactEmail" placeholder="Optional. Where to tell them a request needs attention."></div>
-  <p><label for="jwks">Public keys (JSON Web Key Set)</label></p>
-  <textarea id="jwks" asp-for="Jwks" required placeholder='{"keys": [ ... ]}'></textarea>
-  <div class="row"><button type="submit">Register</button></div>
+  <div class="field"><label for="name">Provider name</label><input id="name" type="text" asp-for="Name" required></div>
+  <div class="field"><label for="email">Contact email <span class="muted">(optional)</span></label><input id="email" type="text" asp-for="ContactEmail" placeholder="Where to tell them a request needs attention"></div>
+  <div class="field"><label for="jwks">Public keys (JSON Web Key Set)</label><textarea id="jwks" asp-for="Jwks" required placeholder='{"keys": [ ... ]}'></textarea></div>
+  <button class="btn primary" type="submit">Register</button>
 </form>

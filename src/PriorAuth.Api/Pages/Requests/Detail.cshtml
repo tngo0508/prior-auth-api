@@ -3,138 +3,185 @@
 @{
     var r = Model.AuthorizationRequest;
     ViewData["Title"] = $"{r.MemberName}, {r.ServiceName}";
+    var canDecide = r.IsOpen && r.MayBeDecidedBy(Model.Me);
+    var canAsk = r.IsOpen && r.MayBeAskedForInformationBy(Model.Me);
+    var today = Model.Today.ToString("yyyy-MM-dd");
 }
-<p><a href="/">Back to the queue</a></p>
-<h1>@r.ServiceName <span class="muted">@r.ServiceCode</span></h1>
+<a class="back" href="/">← Back to the queue</a>
+
+<div class="titlebar">
+  <div>
+    <h1>@r.MemberName</h1>
+    <div>@r.ServiceName <span class="muted">@r.ServiceCode</span></div>
+  </div>
+  <span class="pill @r.Status">@IndexModel.Describe(r.Status)</span>
+</div>
 
 @if (Model.Notice is not null) { <div class="notice" role="status">@Model.Notice</div> }
 @if (Model.Problem is not null) { <div class="problem" role="alert">@Model.Problem</div> }
 
-<div class="card">
-  <dl class="facts">
-    <dt>Member</dt><dd>@r.MemberName @if (r.MemberIdentifier is not null) { <span class="muted">@r.MemberIdentifier.Split('|')[^1]</span> }</dd>
-    <dt>Provider</dt><dd>@r.ProviderName <span class="muted">request @r.ProviderRequestId</span></dd>
-    <dt>Program</dt><dd>@Model.Program</dd>
-    <dt>Review</dt><dd>@IndexModel.Describe(r.ReviewType)</dd>
-    <dt>Received</dt><dd>@Model.Local(r.ReceivedAtUtc)</dd>
-    <dt>Status</dt><dd class="status @r.Status">@IndexModel.Describe(r.Status)</dd>
-    @if (r.Status == AuthorizationStatus.InformationRequested) { <dt>Asked for</dt><dd>@r.Reason</dd> }
-    @if (r.Status == AuthorizationStatus.Approved)
-    {
-      <dt>Approved through</dt><dd>@r.AuthorizedThrough?.ToString("d MMMM yyyy") as @r.AuthorizationNumber</dd>
-      @if (r.Modification is not null) { <dt>Changed from the request</dt><dd>@r.Modification</dd> }
-    }
-    @if (r.Status == AuthorizationStatus.Denied)
-    {
-      <dt>Denial reason</dt><dd>@(Model.DenialReasons.FirstOrDefault(d => d.Code == r.DenialReasonCode)?.Text ?? r.DenialReasonCode): @r.Reason</dd>
-    }
-    @if (r.DecidedAtUtc is { } decided) { <dt>Decided</dt><dd>@Model.Local(decided) by @r.DecidedBy <span class="muted">@r.DecidedByAccount</span></dd> }
-  </dl>
-</div>
+<div class="split @(r.IsOpen ? "" : "single")">
+  <div>
+    <section class="card" aria-labelledby="request-heading">
+      <h2 id="request-heading">The request</h2>
+      <dl class="facts">
+        <dt>Member</dt><dd>@r.MemberName @if (r.MemberIdentifier is not null) { <span class="muted">@r.MemberIdentifier.Split('|')[^1]</span> }</dd>
+        <dt>Provider</dt><dd>@r.ProviderName <span class="muted">request @r.ProviderRequestId</span></dd>
+        <dt>Program</dt><dd>@Model.Program</dd>
+        <dt>Review</dt><dd>@IndexModel.Describe(r.ReviewType)</dd>
+        <dt>Received</dt><dd class="num">@Model.Local(r.ReceivedAtUtc) <span class="muted">(@Model.Ago(r.ReceivedAtUtc))</span></dd>
+        @if (r.Status == AuthorizationStatus.InformationRequested) { <dt>Asked for</dt><dd>@r.Reason</dd> }
+        @if (r.Status == AuthorizationStatus.Approved)
+        {
+          <dt>Approved through</dt><dd>@r.AuthorizedThrough?.ToString("d MMMM yyyy") as <strong>@r.AuthorizationNumber</strong></dd>
+          @if (r.Modification is not null) { <dt>Changed from the request</dt><dd>@r.Modification</dd> }
+        }
+        @if (r.Status == AuthorizationStatus.Denied)
+        {
+          <dt>Denial reason</dt><dd>@(Model.DenialReasons.FirstOrDefault(d => d.Code == r.DenialReasonCode)?.Text ?? r.DenialReasonCode): @r.Reason</dd>
+        }
+        @if (r.DecidedAtUtc is { } decided) { <dt>Decided</dt><dd class="num">@Model.Local(decided) by @r.DecidedBy <span class="muted">@r.DecidedByAccount</span></dd> }
+      </dl>
+    </section>
 
-@if (r.IsOpen)
-{
-  <h2>Who is working on it</h2>
-  <div class="card">
-    @if (r.AssignedTo is null) { <p>No one has claimed this request.</p> }
-    else if (!Model.HeldByAnother) { <p>You are working on this request.</p> }
-    else { <p><strong>@r.AssignedToName</strong> is working on this request. Only they can act on it until it is released.</p> }
-    <div class="row">
-      @if (r.MayBeClaimedBy(Model.Me))
+    <section class="card" aria-labelledby="documents-heading">
+      <h2 id="documents-heading">Documents from the provider</h2>
+      @if (Model.Documents.Count == 0) { <p class="muted">The provider sent no documents.</p> }
+      @foreach (var d in Model.Documents)
       {
-        <form method="post" asp-page-handler="Claim"><input type="hidden" asp-for="Version"><button type="submit">Claim it</button></form>
+        <div class="doc">
+          <div class="doc-head">
+            <a href="/internal/requests/@r.Id/documents/@d.Id">@d.Title</a>
+            <span class="muted num">@d.ContentType · @Math.Max(1, d.SizeBytes / 1024) KB · @Model.Local(d.ReceivedAtUtc)</span>
+          </div>
+          @if (d.Text is not null) { <pre>@d.Text</pre> }
+        </div>
       }
-      @if (r.MayBeReleasedBy(Model.Me))
+    </section>
+
+    <section class="card" aria-labelledby="history-heading">
+      <h2 id="history-heading">History</h2>
+      <ol class="timeline">
+      @foreach (var h in r.History.OrderBy(h => h.AtUtc).ThenBy(h => h.Id))
       {
-        <form method="post" asp-page-handler="Release"><input type="hidden" asp-for="Version"><button type="submit">Release to the queue</button></form>
+        <li><span class="muted num">@Model.Local(h.AtUtc) · @h.Actor</span><br>@h.Text</li>
       }
-    </div>
-    @if (r.MayBeAssignedBy(Model.Me))
-    {
-      <form method="post" asp-page-handler="Assign" class="row">
-        <input type="hidden" asp-for="Version">
-        <label for="assign-to">Assign to</label>
-        <select id="assign-to" name="account">
-          @foreach (var person in Model.Assignable)
-          {
-            <option value="@person.Account" selected="@(person.Account == r.AssignedTo)">@person.DisplayName</option>
-          }
-        </select>
-        <button type="submit">Assign</button>
-      </form>
-      <p class="muted">The list shows people who have signed in to the portal.</p>
-    }
+      </ol>
+    </section>
   </div>
 
-  @if (r.MayBeDecidedBy(Model.Me))
+  @if (r.IsOpen)
   {
-    <h2>Decide</h2>
-    <div class="card">
-      <form method="post" asp-page-handler="Approve" class="row">
-        <input type="hidden" asp-for="Version">
-        <label for="approve-through">Approve in full, through</label>
-        <input id="approve-through" type="date" name="through" min="@Model.Today.ToString("yyyy-MM-dd")" required>
-        <button type="submit">Approve</button>
-      </form>
-      <form method="post" asp-page-handler="ApproveWithChanges">
-        <input type="hidden" asp-for="Version">
-        <div class="row">
-          <label for="changes-through">Approve with changes, through</label>
-          <input id="changes-through" type="date" name="through" min="@Model.Today.ToString("yyyy-MM-dd")" required>
+    <aside class="side" aria-label="Actions">
+      <section class="card" aria-labelledby="holder-heading">
+        <h2 id="holder-heading">Who is working on it</h2>
+        <div class="holder">
+          @if (r.AssignedTo is null) { <p>No one has claimed this request.</p> }
+          else if (!Model.HeldByAnother) { <p>You are working on this request.</p> }
+          else { <p><strong>@r.AssignedToName</strong> is working on this request. Only they can act on it until it is released.</p> }
+          @if (r.MayBeClaimedBy(Model.Me))
+          {
+            <form method="post" asp-page-handler="Claim"><input type="hidden" asp-for="Version"><button class="btn primary" type="submit">Claim it</button></form>
+          }
+          @if (r.MayBeReleasedBy(Model.Me))
+          {
+            <form method="post" asp-page-handler="Release"><input type="hidden" asp-for="Version"><button class="btn" type="submit">Release to the queue</button></form>
+          }
         </div>
-        <div class="row">
-          <input type="text" name="change" placeholder="What is changed, for example 6 hours a week, not 10" aria-label="What is changed" required>
-          <button type="submit">Approve with changes</button>
-        </div>
-      </form>
-      <form method="post" asp-page-handler="Deny">
-        <input type="hidden" asp-for="Version">
-        <div class="row">
-          <label for="deny-code">Deny because</label>
-          <select id="deny-code" name="reasonCode" required>
-            <option value="">Choose a reason…</option>
-            @foreach (var reason in Model.DenialReasons) { <option value="@reason.Code">@reason.Text</option> }
-          </select>
-        </div>
-        <div class="row">
-          <input type="text" name="reason" placeholder="The specific reason, in words the provider and member can act on" aria-label="Specific reason" required>
-          <button type="submit">Deny</button>
-        </div>
-      </form>
-    </div>
-  }
-  else if (!Model.HeldByAnother && Model.Me.WorksQueue)
-  {
-    <p class="muted">@(r.ReviewType == ReviewType.ConcurrentReview ? "Only a physician can decide a concurrent review." : "Only a licensed clinician or a physician can approve or deny.")</p>
-  }
+        @if (r.MayBeAssignedBy(Model.Me))
+        {
+          <form method="post" asp-page-handler="Assign" class="field spaced-sm">
+            <input type="hidden" asp-for="Version">
+            <label for="assign-to">Assign to</label>
+            <div class="row">
+              <select id="assign-to" name="account">
+                @foreach (var person in Model.Assignable)
+                {
+                  <option value="@person.Account" selected="@(person.Account == r.AssignedTo)">@person.DisplayName</option>
+                }
+              </select>
+              <button class="btn" type="submit">Assign</button>
+            </div>
+            <span class="muted">The list shows people who have signed in to the portal.</span>
+          </form>
+        }
+      </section>
 
-  @if (r.MayBeAskedForInformationBy(Model.Me))
-  {
-    <h2>Ask the provider for more</h2>
-    <form method="post" asp-page-handler="RequestInformation" class="row card">
-      <input type="hidden" asp-for="Version">
-      <input type="text" name="missing" placeholder="What is missing, for example the client plan" aria-label="What is missing" required>
-      <button type="submit">Request information</button>
-    </form>
-  }
-}
+      @if (canDecide || canAsk)
+      {
+        <section class="card decide" aria-labelledby="decide-heading">
+          <h2 id="decide-heading">@(canDecide ? "Decide" : "Ask the provider for more")</h2>
+          @if (canDecide)
+          {
+            <fieldset class="choices">
+              <legend>What is your decision?</legend>
+              <label><input type="radio" name="choice" id="choose-approve" checked> Approve</label>
+              <label><input type="radio" name="choice" id="choose-changes"> Approve with changes</label>
+              <label><input type="radio" name="choice" id="choose-deny"> Deny</label>
+              @if (canAsk) { <label><input type="radio" name="choice" id="choose-ask"> Ask for more</label> }
+            </fieldset>
 
-<h2>Documents from the provider</h2>
-@if (Model.Documents.Count == 0) { <p class="muted">None.</p> }
-else
-{
-  <ul>
-  @foreach (var d in Model.Documents)
-  {
-    <li><a href="/internal/requests/@r.Id/documents/@d.Id">@d.Title</a> <span class="muted">@d.ContentType · @Math.Max(1, d.SizeBytes / 1024) KB · @Model.Local(d.ReceivedAtUtc)</span></li>
-  }
-  </ul>
-}
+            <form method="post" asp-page-handler="Approve" class="outcome" id="outcome-approve">
+              <input type="hidden" asp-for="Version">
+              <h3>Approve in full</h3>
+              <div class="field">
+                <label for="approve-through">Approved through</label>
+                <input id="approve-through" type="date" name="through" min="@today" required>
+              </div>
+              <button class="btn approve" type="submit">Approve</button>
+            </form>
 
-<h2>History</h2>
-<ul>
-@foreach (var h in r.History.OrderBy(h => h.AtUtc).ThenBy(h => h.Id))
-{
-  <li><span class="muted">@Model.Local(h.AtUtc) · @h.Actor</span><br>@h.Text</li>
-}
-</ul>
+            <form method="post" asp-page-handler="ApproveWithChanges" class="outcome" id="outcome-changes">
+              <input type="hidden" asp-for="Version">
+              <h3>Approve with changes</h3>
+              <div class="field">
+                <label for="changes-through">Approved through</label>
+                <input id="changes-through" type="date" name="through" min="@today" required>
+              </div>
+              <div class="field">
+                <label for="change">What is changed</label>
+                <input id="change" type="text" name="change" placeholder="For example 6 hours a week, not 10" required>
+                <span class="muted">The provider sees this with the approval.</span>
+              </div>
+              <button class="btn approve" type="submit">Approve with changes</button>
+            </form>
+
+            <form method="post" asp-page-handler="Deny" class="outcome" id="outcome-deny">
+              <input type="hidden" asp-for="Version">
+              <h3>Deny</h3>
+              <div class="field">
+                <label for="deny-code">Reason</label>
+                <select id="deny-code" name="reasonCode" required>
+                  <option value="">Choose a reason…</option>
+                  @foreach (var reason in Model.DenialReasons) { <option value="@reason.Code">@reason.Text</option> }
+                </select>
+              </div>
+              <div class="field">
+                <label for="deny-reason">In your own words</label>
+                <textarea id="deny-reason" name="reason" required placeholder="The specific reason, in words the provider and member can act on"></textarea>
+              </div>
+              <button class="btn deny" type="submit">Deny</button>
+            </form>
+          }
+          @if (canAsk)
+          {
+            <form method="post" asp-page-handler="RequestInformation" class="outcome" id="outcome-ask">
+              <input type="hidden" asp-for="Version">
+              @if (canDecide) { <h3>Ask the provider for more</h3> }
+              <div class="field">
+                <label for="missing">What is missing</label>
+                <textarea id="missing" name="missing" required placeholder="For example the client plan"></textarea>
+                <span class="muted">The request waits for the provider until they answer.</span>
+              </div>
+              <button class="btn primary" type="submit">Request information</button>
+            </form>
+          }
+        </section>
+      }
+      @if (!canDecide && !Model.HeldByAnother && Model.Me.WorksQueue)
+      {
+        <p class="muted">@(r.ReviewType == ReviewType.ConcurrentReview ? "Only a physician can decide a concurrent review." : "Only a licensed clinician or a physician can approve or deny.")</p>
+      }
+    </aside>
+  }
+</div>
