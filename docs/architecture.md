@@ -382,3 +382,4 @@ These are the gaps that matter at the level of architecture. The full list with 
 | Sign-in | [5. Sign-in for provider systems](05-sign-in.md) |
 | CRD and DTR | [6. Asking first: CRD and DTR](06-crd-and-dtr.md) |
 | What the November 2026 audit found | [7. November 2026 audit](07-audit-2026-11.md) |
+| How the code is built, class by class, and how to change it safely | [8. Codebase guide for developers](08-codebase-guide.md) |
