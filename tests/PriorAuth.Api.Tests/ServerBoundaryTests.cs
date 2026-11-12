@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
 
 namespace PriorAuth.Api.Tests;
 
@@ -59,6 +60,37 @@ public class ServerBoundaryTests(ApiFactory factory) : IClassFixture<ApiFactory>
             new FormUrlEncodedContent([new("account", ApiFactory.ClinicianAccount), new("returnUrl", "//attacker.example/")]));
 
         Assert.Equal("/", response.Headers.Location!.ToString());
+    }
+
+    [Fact]
+    public void An_out_of_date_local_database_file_stops_start_up_with_the_fix()
+    {
+        if (Environment.GetEnvironmentVariable("PRIORAUTH_TEST_SQLSERVER") is not null) return; // a SQLite-only check
+        var path = Path.Combine(Path.GetTempPath(), $"priorauth-stale-{Guid.NewGuid():N}.db");
+        try
+        {
+            // A file made by an older build: it has a requests table, without the columns added since.
+            using (var old = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={path};Pooling=False"))
+            {
+                old.Open();
+                using var create = old.CreateCommand();
+                create.CommandText = "CREATE TABLE AuthorizationRequests (Id TEXT PRIMARY KEY)";
+                create.ExecuteNonQuery();
+            }
+            using var stale = factory.WithWebHostBuilder(b => b.UseSetting("ConnectionStrings:PriorAuth", $"Data Source={path};Pooling=False"));
+
+            var refused = Assert.ThrowsAny<Exception>(() => stale.CreateClient());
+
+            var message = (refused.InnerException ?? refused).Message;
+            Assert.Contains("was made by an older version", message);
+            Assert.Contains("AuthorizationRequests.", message);
+            Assert.Contains("more", message);
+            Assert.Contains("delete that file", message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
 
     [Fact]

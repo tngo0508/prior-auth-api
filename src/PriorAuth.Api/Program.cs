@@ -57,8 +57,21 @@ using (var scope = app.Services.CreateScope())
 {
     // SQL Server: apply any migrations that have not been applied yet.
     // SQLite (local development and tests): create the schema from the model. It is never upgraded: delete the file after model changes.
-    var database = scope.ServiceProvider.GetRequiredService<PriorAuthDb>().Database;
-    if (database.IsSqlServer()) database.Migrate(); else database.EnsureCreated();
+    var db = scope.ServiceProvider.GetRequiredService<PriorAuthDb>();
+    if (db.Database.IsSqlServer())
+    {
+        db.Database.Migrate();
+    }
+    else
+    {
+        db.Database.EnsureCreated();
+        // Say so now, rather than failing on the first request that touches what is missing.
+        var missing = db.MissingFromSqliteFile();
+        if (missing.Count > 0)
+            throw new InvalidOperationException(
+                $"The SQLite file {db.Database.GetDbConnection().DataSource} was made by an older version and lacks {string.Join(", ", missing.Take(5))}" +
+                $"{(missing.Count > 5 ? $" and {missing.Count - 5} more" : "")}. Stop the service, delete that file (and its -shm and -wal files), and start again. It holds synthetic test data only.");
+    }
 }
 
 // An unexpected failure is logged in full on the server; the caller gets a FHIR error with no internals in it.
