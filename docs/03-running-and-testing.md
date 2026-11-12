@@ -2,26 +2,7 @@
 
 You need the .NET 10 SDK. Use synthetic data only: there is no audit log yet.
 
-## Two things you can run
-
-| | Learning prototype | The service |
-|---|---|---|
-| Folder | `prototype/PriorAuth.Prototype` | `src/PriorAuth.Api` |
-| Purpose | Understand the flow by playing both sides | The code that will become the real API |
-| Storage | Memory, wiped on restart | SQLite file `priorauth.db` |
-| Address | http://localhost:5019 | http://localhost:5020 |
-
-### The learning prototype
-
-```bash
-dotnet run --project prototype/PriorAuth.Prototype --no-launch-profile --urls http://localhost:5019
-```
-
-Open http://localhost:5019. On the left you are the clinic's EHR; on the right you are the reviewer. Press the steps top to bottom, decide on the right, then check the status again.
-
-![Prototype walkthrough page with the EHR on the left and the reviewer on the right](images/prototype-walkthrough.jpg)
-
-### The service
+## Running the service
 
 ```bash
 dotnet run --project src/PriorAuth.Api --no-launch-profile -- --urls http://localhost:5020 --environment Development

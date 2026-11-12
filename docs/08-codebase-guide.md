@@ -100,8 +100,7 @@ prior-auth-api/
 │       └── developers.html            guide for provider-system developers
 ├── tests/PriorAuth.Api.Tests/         xUnit; real app in-process (section 15)
 ├── samples/PriorAuth.SampleClient/    console app acting as a provider system end to end
-├── samples/PriorAuth.ClinicDemo/      browser demo of a clinic sending a request, for non-developers
-└── prototype/PriorAuth.Prototype/     throwaway learning prototype; not part of the service
+└── samples/PriorAuth.ClinicDemo/      browser demo of a clinic sending a request, for non-developers
 ```
 
 Allowed dependencies between folders (an arrow means "may use"):

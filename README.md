@@ -123,12 +123,6 @@ Run the tests:
 dotnet test
 ```
 
-To learn the basic flow first, run the two-sided prototype at http://localhost:5019:
-
-```bash
-dotnet run --project prototype/PriorAuth.Prototype --no-launch-profile --urls http://localhost:5019
-```
-
 If a command fails with "address already in use" or "file is locked", a copy is already running; stop it with Ctrl+C in its terminal. If the service fails with "no such table", delete `src/PriorAuth.Api/priorauth.db` and start it again.
 
 ## Documentation
@@ -159,7 +153,6 @@ For developers of provider systems, the running service also serves a guide at `
 | [tests/PriorAuth.Api.Tests](tests/PriorAuth.Api.Tests) | 190 automated tests, almost all starting the real app; they run on SQLite or SQL Server |
 | [samples/PriorAuth.SampleClient](samples/PriorAuth.SampleClient) | A sample provider client |
 | [samples/PriorAuth.ClinicDemo](samples/PriorAuth.ClinicDemo) | A browser demo of one request, in plain words, for management |
-| [prototype/PriorAuth.Prototype](prototype/PriorAuth.Prototype) | Throwaway learning prototype, not part of the service |
 | [docs](docs) | Documentation, diagrams and screenshots |
 
 Inside the service:
