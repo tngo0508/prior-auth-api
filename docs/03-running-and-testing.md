@@ -8,15 +8,13 @@ You need the .NET 10 SDK. Use synthetic data only: there is no audit log yet.
 dotnet run --project src/PriorAuth.Api --no-launch-profile -- --urls http://localhost:5020 --environment Development
 ```
 
-Open http://localhost:5020 for the staff portal. In Development it asks you to pick a test user from `StaffSignIn:TestUsers` in [appsettings.Development.json](../src/PriorAuth.Api/appsettings.Development.json); **Test Reviewer (all roles)** can do everything. Provider systems must sign in too, so to send requests as a provider would, run the sample client in a second terminal:
+Open http://localhost:5020 for the staff portal. In Development it asks you to pick a test user from `StaffSignIn:TestUsers` in [appsettings.Development.json](../src/PriorAuth.Api/appsettings.Development.json); **Test Reviewer (all roles)** can do everything. Provider systems must sign in too. To send requests as a provider would, run the clinic demo in a second terminal and open http://localhost:5030:
 
 ```bash
-dotnet run --project samples/PriorAuth.SampleClient -- http://localhost:5020
+dotnet run --project samples/PriorAuth.ClinicDemo
 ```
 
-It registers, asks whether an order needs authorization, signs in, downloads the questionnaire, submits a request with answers and a document, and waits for you to decide it in the portal. It registers itself by signing in as the test admin, so the service must run in Development. [5. Sign-in](05-sign-in.md) and [6. CRD and DTR](06-crd-and-dtr.md) explain what it is doing. [requests.http](../src/PriorAuth.Api/requests.http) holds the calls that need no token.
-
-For a demo to people who are not developers, run `dotnet run --project samples/PriorAuth.ClinicDemo` instead and open http://localhost:5030. It does the same steps from a browser page; the README's "Demo for management" section has the script.
+It registers, signs in, asks whether an order needs authorization, downloads the questionnaire, submits a request with answers and a document, and waits for you to decide it in the portal. It registers itself by signing in as the test admin, so the service must run in Development. [5. Sign-in](05-sign-in.md) and [6. CRD and DTR](06-crd-and-dtr.md) explain what it is doing; the README's "Demo for management" section has a script for showing it to people who are not developers. [requests.http](../src/PriorAuth.Api/requests.http) holds the calls that need no token.
 
 To start with an empty database, stop the app and delete `src/PriorAuth.Api/priorauth.db`. Do this too after pulling changes that alter the data model: the local SQLite file is created once and is not upgraded.
 

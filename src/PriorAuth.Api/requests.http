@@ -1,5 +1,5 @@
 # Calls that need no access token. Submitting and inquiring need one:
-# use samples/PriorAuth.SampleClient for those. Synthetic data only.
+# run samples/PriorAuth.ClinicDemo for those. Synthetic data only.
 @host = http://localhost:5020
 
 ### What the server supports

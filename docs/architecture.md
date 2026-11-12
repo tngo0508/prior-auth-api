@@ -129,7 +129,7 @@ Other projects in the repository:
 | Project | Purpose |
 |---|---|
 | [tests/PriorAuth.Api.Tests](../tests/PriorAuth.Api.Tests) | 190 automated tests; nearly all start the real app and call it over HTTP, on SQLite or SQL Server |
-| [samples/PriorAuth.SampleClient](../samples/PriorAuth.SampleClient) | A console program that behaves like a provider system, end to end |
+| [samples/PriorAuth.ClinicDemo](../samples/PriorAuth.ClinicDemo) | A browser demo that behaves like a provider system, end to end |
 
 ## 4. How a request moves through it
 

@@ -142,13 +142,13 @@ The original `QuestionnaireResponse` is also kept, inside the stored request.
 
 ## Try it
 
-With the service running:
+With the service running, start the clinic demo and open http://localhost:5030:
 
 ```bash
-dotnet run --project samples/PriorAuth.SampleClient -- http://localhost:5020
+dotnet run --project samples/PriorAuth.ClinicDemo
 ```
 
-[The sample client](../samples/PriorAuth.SampleClient/Program.cs) asks about an order (CRD), downloads the questionnaire it is pointed to (DTR), and submits a request with answers and a document (PAS). Then open the reviewer queue to see what arrived.
+It asks about an order (CRD), downloads the questionnaire it is pointed to (DTR), and submits a request with answers and a document (PAS); the calls are in [PlanConnection.cs](../samples/PriorAuth.ClinicDemo/PlanConnection.cs). Then open the reviewer queue to see what arrived.
 
 ## What this does not do yet
 
