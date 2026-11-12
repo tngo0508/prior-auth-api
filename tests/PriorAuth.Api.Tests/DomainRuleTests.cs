@@ -42,7 +42,7 @@ public class DomainRuleTests
     {
         var request = Pended();
 
-        request.Approve(new DateOnly(2026, 11, 11), "PA-1", "Reviewer", new DateTime(2026, 11, 12, 1, 30, 0, DateTimeKind.Utc), today: new DateOnly(2026, 11, 11));
+        request.Approve(new DateOnly(2026, 11, 11), "PA-1", Reviewer, new DateTime(2026, 11, 12, 1, 30, 0, DateTimeKind.Utc), today: new DateOnly(2026, 11, 11));
 
         Assert.Equal(AuthorizationStatus.Approved, request.Status);
     }
@@ -52,7 +52,7 @@ public class DomainRuleTests
     {
         var clock = new PlanClock(new FixedTime(new DateTimeOffset(2026, 11, 12, 1, 30, 0, TimeSpan.Zero)), new ConfigurationBuilder().Build());
         var request = Pended();
-        request.Approve(new DateOnly(2026, 11, 30), "PA-1", "Reviewer", clock.UtcNow, clock.Today);
+        request.Approve(new DateOnly(2026, 11, 30), "PA-1", Reviewer, clock.UtcNow, clock.Today);
         var claim = new Hl7.Fhir.Model.Claim { Item = [new() { Sequence = 1 }] };
 
         var response = PriorAuth.Api.Fhir.PasMapper.ToClaimResponse(request, claim, "https://plan.example", clock);
@@ -66,7 +66,7 @@ public class DomainRuleTests
     {
         var request = Pended();
 
-        request.Deny("Not medically necessary", "Reviewer", DateTime.UtcNow);
+        request.Deny("not-medically-necessary", "Not medically necessary", Reviewer, DateTime.UtcNow);
 
         Assert.Null(request.AuthorizationNumber);
         Assert.Null(request.AuthorizedThrough);
@@ -78,10 +78,28 @@ public class DomainRuleTests
         var request = Pended();
         var before = request.Version;
 
-        request.RequestInformation("Client plan", "Reviewer", DateTime.UtcNow);
+        request.RequestInformation("Client plan", Reviewer, DateTime.UtcNow);
 
         Assert.True(request.Version > before);
     }
+
+    [Fact]
+    public void An_approval_with_changes_is_answered_as_modified_with_the_change()
+    {
+        var clock = new PlanClock(new FixedTime(new DateTimeOffset(2026, 11, 12, 18, 0, 0, TimeSpan.Zero)), new ConfigurationBuilder().Build());
+        var request = Pended();
+        request.ApproveWithChanges(new DateOnly(2027, 2, 4), "6 hours a week, not 10", "PA-1", Reviewer, clock.UtcNow, clock.Today);
+        var claim = new Hl7.Fhir.Model.Claim { Item = [new() { Sequence = 1 }] };
+
+        var response = PriorAuth.Api.Fhir.PasMapper.ToClaimResponse(request, claim, "https://plan.example", clock);
+
+        var action = response.Item[0].Adjudication[0].Extension.Single(e => e.Url == PriorAuth.Api.Fhir.PasMapper.ReviewActionUrl);
+        var code = Assert.IsType<Hl7.Fhir.Model.CodeableConcept>(action.Extension.Single(e => e.Url == PriorAuth.Api.Fhir.PasMapper.ReviewActionCodeUrl).Value);
+        Assert.Equal("A6", code.Coding[0].Code);
+        Assert.Equal("Approved with changes through 2027-02-04: 6 hours a week, not 10", response.Disposition);
+    }
+
+    private static readonly Staff Reviewer = new(@"DEV\lee", "Lee Clinician", new HashSet<StaffRole> { StaffRole.LicensedClinician });
 
     private static AuthorizationRequest Pended() => AuthorizationRequest.Receive(
         new RequestDetails("client", "", "REQ-1", "Clinic", "Alex Testpatient", "sys|1", CodeSystems.Hcpcs, "H2019", "TBS"),

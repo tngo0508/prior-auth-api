@@ -77,6 +77,7 @@ grant_type=client_credentials
 <tr><th>Code</th><th><code>outcome</code></th><th>Meaning</th><th>Also look at</th></tr>
 <tr><td>A4</td><td><code>queued</code></td><td>Pended. A reviewer has not decided yet.</td><td><code>communicationRequest</code>, if the reviewer needs more information</td></tr>
 <tr><td>A1</td><td><code>complete</code></td><td>Approved.</td><td><code>preAuthRef</code> (authorization number), <code>preAuthPeriod.end</code></td></tr>
+<tr><td>A6</td><td><code>complete</code></td><td>Approved with changes, for example fewer units than asked.</td><td><code>disposition</code> (what was changed), <code>preAuthRef</code>, <code>preAuthPeriod.end</code></td></tr>
 <tr><td>A3</td><td><code>complete</code></td><td>Denied.</td><td><code>disposition</code> (the specific reason)</td></tr>
 <tr><td>NA</td><td><code>complete</code></td><td>No authorization is required for this service.</td><td></td></tr>
 </table></div>

@@ -28,16 +28,18 @@ flowchart LR
     end
     subgraph Plan["Behavioral Health Plan"]
         API["Prior Authorization API<br/>(this project)"]
-        REV["Reviewer"]
-        ADMIN["Staff who register<br/>provider systems"]
+        REV["Reviewers and coordinators"]
+        ADMIN["Admins who register<br/>provider systems"]
+        AD["Active Directory<br/>(staff accounts and groups)"]
         POLICY["Clinical policy staff"]
     end
     DHCS["DHCS<br/>(oversight)"]
 
     CLIN -- "writes orders,<br/>answers questions" --> EHR
     EHR -- "FHIR over HTTPS,<br/>signed with its own key" --> API
-    REV -- "reviewer queue<br/>(browser)" --> API
-    ADMIN -- "registers public keys" --> API
+    REV -- "staff portal, Windows sign-in<br/>(browser)" --> API
+    ADMIN -- "registers public keys<br/>(staff portal)" --> API
+    API -- "roles from<br/>group membership" --> AD
     POLICY -. "service list and questions<br/>(a configuration file)" .-> API
     API -. "public documentation,<br/>test evidence, metrics" .-> DHCS
 ```
@@ -59,7 +61,7 @@ The system does not connect to an eligibility system, a claims system, or the pl
 ```mermaid
 flowchart TB
     EHR["Provider System"]
-    BROWSER["Reviewer's browser"]
+    BROWSER["Plan staff's browser"]
 
     subgraph APP["PriorAuth.Api  (ASP.NET Core on .NET 10, one process)"]
         direction TB
@@ -69,8 +71,9 @@ flowchart TB
             CRD["Crd<br/>CDS Hooks services"]
             DTR["Dtr<br/>questionnaire package"]
             PAS["Fhir<br/>submit, inquire, read"]
-            REVIEW["Review<br/>queue and decisions"]
-            STATIC["wwwroot<br/>reviewer page, developer guide"]
+            PAGES["Pages<br/>staff portal"]
+            REVIEW["Review<br/>ReviewDesk, queue JSON"]
+            STATIC["wwwroot<br/>developer guide"]
             HEALTH["/health<br/>database check"]
         end
         subgraph CORE["Core"]
@@ -88,6 +91,7 @@ flowchart TB
     EHR --> BOUNDARY
     BROWSER --> BOUNDARY
     BOUNDARY --> EDGE
+    PAGES --> REVIEW
     REVIEW --> CLOCK
     CRD --> CLOCK
     HEALTH --> DATA
@@ -112,12 +116,13 @@ The code is organized by what each part is for:
 | [Fhir](../src/PriorAuth.Api/Fhir) | PAS endpoints, reading and writing FHIR JSON, translating between FHIR and the domain | Domain, Data, Auth |
 | [Crd](../src/PriorAuth.Api/Crd) | CDS Hooks discovery and the two order services | Domain, Auth, Dtr |
 | [Dtr](../src/PriorAuth.Api/Dtr) | Builds questionnaires from the service list and serves them | Domain, Auth |
-| [Review](../src/PriorAuth.Api/Review) | The reviewer queue, decisions and document download | Domain, Data |
-| [Auth](../src/PriorAuth.Api/Auth) | Registration of provider systems, the token endpoint, token checks | Data |
+| [Review](../src/PriorAuth.Api/Review) | `ReviewDesk` (every staff action on a request), the queue as JSON, decisions and document download | Domain, Data |
+| [Pages](../src/PriorAuth.Api/Pages) | The staff portal: queue, request, provider systems, test-user sign-in | Review, Auth, Data |
+| [Auth](../src/PriorAuth.Api/Auth) | Registration of provider systems, the token endpoint, token checks; staff sign-in and roles | Data, Domain |
 | [Data](../src/PriorAuth.Api/Data) | Database mapping and migrations | Domain, Auth |
-| [wwwroot](../src/PriorAuth.Api/wwwroot) | The reviewer page and the developer guide, as static files | Nothing |
+| [wwwroot](../src/PriorAuth.Api/wwwroot) | The developer guide, as a static file | Nothing |
 
-The rule that keeps this maintainable: **business rules live only in `Domain`**. An endpoint may refuse a malformed message, but whether a request can be approved, denied or changed is decided by `AuthorizationRequest` and nowhere else. That is why the same rules hold whether a decision arrives from the reviewer page or any future caller.
+The rule that keeps this maintainable: **business rules live only in `Domain`**. An endpoint may refuse a malformed message, but whether a request can be approved, denied or changed is decided by `AuthorizationRequest` and nowhere else. That includes who may do what: a coordinator cannot approve, only a physician decides a concurrent review, and a request claimed by one person cannot be decided by another. That is why the same rules hold whether a decision arrives from the portal, the JSON endpoints or any future caller.
 
 Other projects in the repository:
 
@@ -261,7 +266,8 @@ flowchart LR
         J1["/cds-services/{id}"]
         J2["/auth/token"]
     end
-    subgraph LOCAL["Same machine only"]
+    subgraph LOCAL["Plan staff sign-in and role"]
+        L0["/ (portal pages)"]
         L1["/internal/requests/..."]
         L2["/internal/clients/..."]
     end
@@ -272,7 +278,7 @@ flowchart LR
 | No sign-in | Open to anyone | These only describe the server or plan policy. No member data. |
 | Access token | A five-minute token from `/auth/token`, carrying the right scope | Standard SMART Backend Services |
 | Signed statement | A short statement signed with the provider system's private key, made for that exact address, used once | How sign-in itself works, and what CDS Hooks requires on each call |
-| Same machine only | Answers only callers on the server itself, not forwarded by a proxy, addressed to `localhost`; changes also need the reviewer page's `X-Requested-By` header | A stopgap. Staff sign-in is not built. |
+| Plan staff sign-in and role | Windows Integrated Authentication (Kerberos or NTLM); roles from the plan's Active Directory groups. The portal's forms carry an anti-forgery token; changes under `/internal` also need the `X-Requested-By` header. In Development a page to pick a test user stands in, and start-up refuses it anywhere else. | Staff are identified by the account they already use, and the plan manages access through groups it already has. |
 
 The controls that matter most:
 
@@ -294,7 +300,8 @@ Details: [Sign-in for provider systems](05-sign-in.md).
 | Database access | Entity Framework Core 10 | Migrations for SQL Server; SQLite for local work with no setup |
 | Tokens | `Microsoft.IdentityModel.JsonWebTokens`, ASP.NET Core JWT bearer | Standard, maintained JWT handling |
 | Tests | xUnit with `WebApplicationFactory` | Tests run the real app over HTTP, on SQLite or SQL Server |
-| Reviewer page | One static HTML file with plain JavaScript | No build step; replaceable later |
+| Staff portal | ASP.NET Core Razor Pages, server-rendered, no JavaScript framework | No build step; works with Windows sign-in in the browser; one project to deploy |
+| Staff sign-in | Windows Integrated Authentication (`Microsoft.AspNetCore.Authentication.Negotiate`), roles from AD groups | The plan already runs Active Directory; no new accounts or passwords |
 
 Standards targeted: FHIR R4.0.1, Da Vinci PAS, CRD and DTR at STU 2.0.1, SMART Backend Services, CDS Hooks.
 
@@ -353,8 +360,7 @@ These are the gaps that matter at the level of architecture. The full list with 
 
 | Gap | Effect |
 |---|---|
-| Staff sign-in | Reviewers and registration staff are not identified. The system must not hold real data until this exists. |
-| Audit log of access | Who read which request is not logged for review. |
+| Audit log of access | Who read which request is not logged for review. The system must not hold real data until this exists. |
 | Eligibility | The system does not know whether a member is enrolled. |
 | Conformance testing | Response Bundles were checked once with a validator during the audit, but no validator runs in the build and no Inferno run has been made. US Core / USCDI conformance of incoming resources is not checked. Interoperability with a real EHR is unproven. |
 | Automatic answers in questionnaires | A person types every answer. |

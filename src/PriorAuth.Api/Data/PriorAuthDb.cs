@@ -26,10 +26,14 @@ public class PriorAuthDb(DbContextOptions<PriorAuthDb> options) : DbContext(opti
             options.UseSqlite(connectionString);
     }
 
+    /// <summary>Longest sign-in account kept (DOMAIN\\user or user@domain).</summary>
+    public const int MaxAccountLength = 256;
+
     public DbSet<AuthorizationRequest> AuthorizationRequests => Set<AuthorizationRequest>();
     public DbSet<ProviderClient> ProviderClients => Set<ProviderClient>();
     public DbSet<SupportingDocument> SupportingDocuments => Set<SupportingDocument>();
     public DbSet<HistoryEntry> HistoryEntries => Set<HistoryEntry>();
+    public DbSet<StaffMember> StaffMembers => Set<StaffMember>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder conventions)
     {
@@ -53,6 +57,11 @@ public class PriorAuthDb(DbContextOptions<PriorAuthDb> options) : DbContext(opti
         request.Property(r => r.Status).HasConversion<string>().HasMaxLength(32);
         request.Property(r => r.ReviewType).HasConversion<string>().HasMaxLength(32);
         request.Property(r => r.Version).IsConcurrencyToken();
+        request.Property(r => r.DecidedByAccount).HasMaxLength(MaxAccountLength);
+        request.Property(r => r.AssignedTo).HasMaxLength(MaxAccountLength);
+        request.Property(r => r.AssignedToName).HasMaxLength(256);
+        request.Property(r => r.DenialReasonCode).HasMaxLength(64);
+        request.HasIndex(r => r.AssignedTo);
         request.HasMany(r => r.History).WithOne().HasForeignKey("AuthorizationRequestId").IsRequired();
         request.Navigation(r => r.History).UsePropertyAccessMode(PropertyAccessMode.Field);
         request.HasMany(r => r.Documents).WithOne().HasForeignKey("AuthorizationRequestId").IsRequired();
@@ -82,6 +91,13 @@ public class PriorAuthDb(DbContextOptions<PriorAuthDb> options) : DbContext(opti
         resubmission.Property(b => b.ReceivedAtUtc);
 
         model.Entity<ProviderClient>().HasKey(c => c.ClientId);
+        model.Entity<ProviderClient>().Property(c => c.ContactEmail).HasMaxLength(320);
+
+        var staff = model.Entity<StaffMember>();
+        staff.HasKey(m => m.Account);
+        staff.Property(m => m.Account).HasMaxLength(MaxAccountLength);
+        staff.Property(m => m.DisplayName).HasMaxLength(256);
+        staff.Property(m => m.Roles).HasMaxLength(256);
 
         void Exact(Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<string> property)
         {

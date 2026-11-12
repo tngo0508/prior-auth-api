@@ -24,7 +24,12 @@ public sealed class PlanConnection(string planApi)
     private const string CoverageInformation = "http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information";
     private static readonly JsonSerializerOptions Pretty = new() { WriteIndented = true };
 
-    private readonly HttpClient _http = new() { BaseAddress = new Uri(planApi), Timeout = TimeSpan.FromSeconds(15) };
+    /// <summary>The plan's test admin, from the API's appsettings.Development.json. Registering a provider system needs an admin.</summary>
+    public const string PlanAdminAccount = @"DEV\ari.admin";
+
+    // Keeps the staff sign-in cookie; does not follow the sign-in redirect.
+    private readonly HttpClient _http = new(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = true })
+        { BaseAddress = new Uri(planApi), Timeout = TimeSpan.FromSeconds(15) };
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly RSA _key = RSA.Create(2048);
     private readonly string _keyId = Guid.NewGuid().ToString("N");
@@ -295,12 +300,17 @@ public sealed class PlanConnection(string planApi)
         if (_clientId is not null) return;
         var publicPart = _key.ExportParameters(includePrivateParameters: false);
         var keys = new { keys = new[] { new { kty = "RSA", kid = _keyId, use = "sig", alg = "RS384", n = Base64UrlEncoder.Encode(publicPart.Modulus), e = Base64UrlEncoder.Encode(publicPart.Exponent) } } };
-        // Registration is the plan's onboarding step. It only works from the API's own machine.
+        // Registration is the plan's onboarding step, done by a plan admin. The demo signs in as the test admin,
+        // which only exists when the API runs in the Development environment.
+        var signIn = await _http.PostAsync("/staff/dev-sign-in", new FormUrlEncodedContent([new("account", PlanAdminAccount), new("returnUrl", "/")]));
+        if (signIn.StatusCode != HttpStatusCode.Redirect)
+            throw new PlanRefusedException("The demo could not sign in to the plan as its test admin. Run the API in the Development environment.",
+                $"POST /staff/dev-sign-in answered {(int)signIn.StatusCode}.");
         var call = new HttpRequestMessage(HttpMethod.Post, "/internal/clients") { Content = JsonContent.Create(new { name = ClinicName, jwks = keys }) };
         call.Headers.Add("X-Requested-By", "prior-auth-reviewer");
         var response = await _http.SendAsync(call);
         var text = await response.Content.ReadAsStringAsync();
-        EnsureOk(response, text, "The plan would not register the clinic. Run the demo on the same machine as the API.");
+        EnsureOk(response, text, "The plan would not register the clinic.");
         _clientId = JsonDocument.Parse(text).RootElement.GetProperty("clientId").GetString();
     }
 

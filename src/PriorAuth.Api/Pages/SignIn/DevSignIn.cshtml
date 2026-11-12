@@ -1,0 +1,15 @@
+@page "/staff/dev-sign-in"
+@model PriorAuth.Api.Pages.SignIn.DevSignInModel
+@{ ViewData["Title"] = "Pick a test user"; }
+<h1>Pick a test user</h1>
+<p>This is the Development stand-in for Windows sign-in. Each user has the roles shown; real staff get theirs from Active Directory groups.</p>
+@if (Model.Users.Count == 0) { <p class="problem">No test users are configured. Add them under StaffSignIn:TestUsers in appsettings.Development.json.</p> }
+@foreach (var user in Model.Users)
+{
+  <form method="post" action="/staff/dev-sign-in" class="card row">
+    <input type="hidden" name="account" value="@user.Account">
+    <input type="hidden" name="returnUrl" value="@Model.ReturnUrl">
+    <button type="submit">Sign in as @user.DisplayName</button>
+    <span class="muted">@user.Account · @string.Join(", ", user.Roles.Order().Select(r => r.Describe()))</span>
+  </form>
+}

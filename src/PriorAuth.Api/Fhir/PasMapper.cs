@@ -246,6 +246,7 @@ public static class PasMapper
         // X12 306 review action codes, as used by PAS.
         var (outcome, code, display) = request.Status switch
         {
+            AuthorizationStatus.Approved when request.Modification is not null => (ClaimProcessingCodes.Complete, "A6", "Modified"),
             AuthorizationStatus.Approved => (ClaimProcessingCodes.Complete, "A1", "Certified in total"),
             AuthorizationStatus.Denied => (ClaimProcessingCodes.Complete, "A3", "Not Certified"),
             AuthorizationStatus.NotRequired => (ClaimProcessingCodes.Complete, "NA", "No Action Required"),
@@ -284,6 +285,8 @@ public static class PasMapper
             Outcome = outcome,
             Disposition = request.Status switch
             {
+                AuthorizationStatus.Approved when request.Modification is not null =>
+                    $"Approved with changes through {request.AuthorizedThrough:yyyy-MM-dd}: {request.Modification}",
                 AuthorizationStatus.Approved => $"Approved through {request.AuthorizedThrough:yyyy-MM-dd}.",
                 AuthorizationStatus.Denied => $"Denied: {request.Reason}",
                 AuthorizationStatus.InformationRequested => $"More information needed: {request.Reason}",

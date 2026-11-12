@@ -596,9 +596,9 @@ public class CrdAndDtrTests(ApiFactory factory) : IClassFixture<ApiFactory>, IAs
         var submitted = await _signedIn.PostAsync("/fhir/Claim/$submit", Fhir(RequestBundle($"REQ-{Guid.NewGuid():N}", answers)));
         var id = (await submitted.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("entry")[0].GetProperty("resource").GetProperty("id").GetString();
 
-        var entry = (await _anonymous.GetFromJsonAsync<JsonElement>("/internal/requests")).EnumerateArray().Single(r => r.GetProperty("id").GetString() == id);
+        var entry = (await factory.CreateClient().GetFromJsonAsync<JsonElement>("/internal/requests")).EnumerateArray().Single(r => r.GetProperty("id").GetString() == id);
         var document = Assert.Single(entry.GetProperty("documents").EnumerateArray());
-        var text = await _anonymous.GetStringAsync($"/internal/requests/{id}/documents/{document.GetProperty("id").GetString()}");
+        var text = await factory.CreateClient().GetStringAsync($"/internal/requests/{id}/documents/{document.GetProperty("id").GetString()}");
 
         Assert.Equal("Questionnaire answers: Therapeutic behavioral services or therapeutic foster care", document.GetProperty("title").GetString());
         Assert.Contains("Date of the most recent assessment: 2026-10-30", text);

@@ -1,0 +1,140 @@
+@page "/requests/{id}"
+@model PriorAuth.Api.Pages.Requests.DetailModel
+@{
+    var r = Model.AuthorizationRequest;
+    ViewData["Title"] = $"{r.MemberName}, {r.ServiceName}";
+}
+<p><a href="/">Back to the queue</a></p>
+<h1>@r.ServiceName <span class="muted">@r.ServiceCode</span></h1>
+
+@if (Model.Notice is not null) { <div class="notice" role="status">@Model.Notice</div> }
+@if (Model.Problem is not null) { <div class="problem" role="alert">@Model.Problem</div> }
+
+<div class="card">
+  <dl class="facts">
+    <dt>Member</dt><dd>@r.MemberName @if (r.MemberIdentifier is not null) { <span class="muted">@r.MemberIdentifier.Split('|')[^1]</span> }</dd>
+    <dt>Provider</dt><dd>@r.ProviderName <span class="muted">request @r.ProviderRequestId</span></dd>
+    <dt>Program</dt><dd>@Model.Program</dd>
+    <dt>Review</dt><dd>@IndexModel.Describe(r.ReviewType)</dd>
+    <dt>Received</dt><dd>@Model.Local(r.ReceivedAtUtc)</dd>
+    <dt>Status</dt><dd class="status @r.Status">@IndexModel.Describe(r.Status)</dd>
+    @if (r.Status == AuthorizationStatus.InformationRequested) { <dt>Asked for</dt><dd>@r.Reason</dd> }
+    @if (r.Status == AuthorizationStatus.Approved)
+    {
+      <dt>Approved through</dt><dd>@r.AuthorizedThrough?.ToString("d MMMM yyyy") as @r.AuthorizationNumber</dd>
+      @if (r.Modification is not null) { <dt>Changed from the request</dt><dd>@r.Modification</dd> }
+    }
+    @if (r.Status == AuthorizationStatus.Denied)
+    {
+      <dt>Denial reason</dt><dd>@(Model.DenialReasons.FirstOrDefault(d => d.Code == r.DenialReasonCode)?.Text ?? r.DenialReasonCode): @r.Reason</dd>
+    }
+    @if (r.DecidedAtUtc is { } decided) { <dt>Decided</dt><dd>@Model.Local(decided) by @r.DecidedBy <span class="muted">@r.DecidedByAccount</span></dd> }
+  </dl>
+</div>
+
+@if (r.IsOpen)
+{
+  <h2>Who is working on it</h2>
+  <div class="card">
+    @if (r.AssignedTo is null) { <p>No one has claimed this request.</p> }
+    else if (!Model.HeldByAnother) { <p>You are working on this request.</p> }
+    else { <p><strong>@r.AssignedToName</strong> is working on this request. Only they can act on it until it is released.</p> }
+    <div class="row">
+      @if (r.AssignedTo is null && Model.Me.WorksQueue)
+      {
+        <form method="post" asp-page-handler="Claim"><input type="hidden" asp-for="Version"><button type="submit">Claim it</button></form>
+      }
+      @if (r.AssignedTo is not null && (!Model.HeldByAnother || Model.Me.Has(StaffRole.Coordinator)))
+      {
+        <form method="post" asp-page-handler="Release"><input type="hidden" asp-for="Version"><button type="submit">Release to the queue</button></form>
+      }
+    </div>
+    @if (Model.Me.Has(StaffRole.Coordinator))
+    {
+      <form method="post" asp-page-handler="Assign" class="row">
+        <input type="hidden" asp-for="Version">
+        <label for="assign-to">Assign to</label>
+        <select id="assign-to" name="account">
+          @foreach (var person in Model.Assignable)
+          {
+            <option value="@person.Account" selected="@(person.Account == r.AssignedTo)">@person.DisplayName</option>
+          }
+        </select>
+        <button type="submit">Assign</button>
+      </form>
+      <p class="muted">The list shows people who have signed in to the portal.</p>
+    }
+  </div>
+
+  @if (Model.MayDecide)
+  {
+    <h2>Decide</h2>
+    <div class="card">
+      <form method="post" asp-page-handler="Approve" class="row">
+        <input type="hidden" asp-for="Version">
+        <label for="approve-through">Approve in full, through</label>
+        <input id="approve-through" type="date" name="through" min="@Model.Today.ToString("yyyy-MM-dd")" required>
+        <button type="submit">Approve</button>
+      </form>
+      <form method="post" asp-page-handler="ApproveWithChanges">
+        <input type="hidden" asp-for="Version">
+        <div class="row">
+          <label for="changes-through">Approve with changes, through</label>
+          <input id="changes-through" type="date" name="through" min="@Model.Today.ToString("yyyy-MM-dd")" required>
+        </div>
+        <div class="row">
+          <input type="text" name="change" placeholder="What is changed, for example 6 hours a week, not 10" aria-label="What is changed" required>
+          <button type="submit">Approve with changes</button>
+        </div>
+      </form>
+      <form method="post" asp-page-handler="Deny">
+        <input type="hidden" asp-for="Version">
+        <div class="row">
+          <label for="deny-code">Deny because</label>
+          <select id="deny-code" name="reasonCode" required>
+            <option value="">Choose a reason…</option>
+            @foreach (var reason in Model.DenialReasons) { <option value="@reason.Code">@reason.Text</option> }
+          </select>
+        </div>
+        <div class="row">
+          <input type="text" name="reason" placeholder="The specific reason, in words the provider and member can act on" aria-label="Specific reason" required>
+          <button type="submit">Deny</button>
+        </div>
+      </form>
+    </div>
+  }
+  else if (!Model.HeldByAnother && Model.Me.WorksQueue)
+  {
+    <p class="muted">@(r.ReviewType == ReviewType.ConcurrentReview ? "Only a physician can decide a concurrent review." : "Only a licensed clinician or a physician can approve or deny.")</p>
+  }
+
+  @if (Model.MayRequestInformation)
+  {
+    <h2>Ask the provider for more</h2>
+    <form method="post" asp-page-handler="RequestInformation" class="row card">
+      <input type="hidden" asp-for="Version">
+      <input type="text" name="missing" placeholder="What is missing, for example the client plan" aria-label="What is missing" required>
+      <button type="submit">Request information</button>
+    </form>
+  }
+}
+
+<h2>Documents from the provider</h2>
+@if (r.Documents.Count == 0) { <p class="muted">None.</p> }
+else
+{
+  <ul>
+  @foreach (var d in r.Documents.OrderBy(d => d.ReceivedAtUtc))
+  {
+    <li><a href="/internal/requests/@r.Id/documents/@d.Id">@d.Title</a> <span class="muted">@d.ContentType · @Math.Max(1, d.SizeBytes / 1024) KB · @Model.Local(d.ReceivedAtUtc)</span></li>
+  }
+  </ul>
+}
+
+<h2>History</h2>
+<ul>
+@foreach (var h in r.History.OrderBy(h => h.AtUtc).ThenBy(h => h.Id))
+{
+  <li><span class="muted">@Model.Local(h.AtUtc) · @h.Actor</span><br>@h.Text</li>
+}
+</ul>

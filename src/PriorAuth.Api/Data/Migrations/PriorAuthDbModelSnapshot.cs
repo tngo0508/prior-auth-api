@@ -30,6 +30,10 @@ namespace PriorAuth.Api.Data.Migrations
                     b.Property<bool>("Active")
                         .HasColumnType("bit");
 
+                    b.Property<string>("ContactEmail")
+                        .HasMaxLength(320)
+                        .HasColumnType("nvarchar(320)");
+
                     b.Property<string>("JwksJson")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -51,6 +55,14 @@ namespace PriorAuth.Api.Data.Migrations
                     b.Property<string>("Id")
                         .HasColumnType("nvarchar(450)");
 
+                    b.Property<string>("AssignedTo")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("AssignedToName")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
                     b.Property<string>("AuthorizationNumber")
                         .HasColumnType("nvarchar(max)");
 
@@ -69,6 +81,14 @@ namespace PriorAuth.Api.Data.Migrations
                     b.Property<string>("DecidedBy")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("DecidedByAccount")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("DenialReasonCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<DateTime>("LastChangedAtUtc")
                         .HasColumnType("datetime2");
 
@@ -77,6 +97,9 @@ namespace PriorAuth.Api.Data.Migrations
 
                     b.Property<string>("MemberName")
                         .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Modification")
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("ProviderName")
@@ -131,6 +154,8 @@ namespace PriorAuth.Api.Data.Migrations
                         .HasColumnType("int");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AssignedTo");
 
                     b.HasIndex("Status", "ReceivedAtUtc");
 
@@ -199,6 +224,30 @@ namespace PriorAuth.Api.Data.Migrations
                     b.HasIndex("AuthorizationRequestId");
 
                     b.ToTable("ReceivedBundle");
+                });
+
+            modelBuilder.Entity("PriorAuth.Api.Domain.StaffMember", b =>
+                {
+                    b.Property<string>("Account")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<DateTime>("LastSeenAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Roles")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.HasKey("Account");
+
+                    b.ToTable("StaffMembers");
                 });
 
             modelBuilder.Entity("PriorAuth.Api.Domain.SupportingDocument", b =>

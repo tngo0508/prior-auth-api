@@ -1,6 +1,6 @@
 # 3. Running and testing
 
-You need the .NET 10 SDK. Use synthetic data only; agency staff sign-in does not exist yet.
+You need the .NET 10 SDK. Use synthetic data only: there is no audit log yet.
 
 ## Two things you can run
 
@@ -27,13 +27,13 @@ Open http://localhost:5019. On the left you are the clinic's EHR; on the right y
 dotnet run --project src/PriorAuth.Api --no-launch-profile -- --urls http://localhost:5020 --environment Development
 ```
 
-Open http://localhost:5020 for the reviewer queue. Provider systems must sign in, so to send requests as a provider would, run the sample client in a second terminal:
+Open http://localhost:5020 for the staff portal. In Development it asks you to pick a test user from `StaffSignIn:TestUsers` in [appsettings.Development.json](../src/PriorAuth.Api/appsettings.Development.json); **Test Reviewer (all roles)** can do everything. Provider systems must sign in too, so to send requests as a provider would, run the sample client in a second terminal:
 
 ```bash
 dotnet run --project samples/PriorAuth.SampleClient -- http://localhost:5020
 ```
 
-It registers, asks whether an order needs authorization, signs in, downloads the questionnaire, submits a request with answers and a document, and waits for you to decide it in the queue. [5. Sign-in](05-sign-in.md) and [6. CRD and DTR](06-crd-and-dtr.md) explain what it is doing. [requests.http](../src/PriorAuth.Api/requests.http) holds the calls that need no token.
+It registers, asks whether an order needs authorization, signs in, downloads the questionnaire, submits a request with answers and a document, and waits for you to decide it in the portal. It registers itself by signing in as the test admin, so the service must run in Development. [5. Sign-in](05-sign-in.md) and [6. CRD and DTR](06-crd-and-dtr.md) explain what it is doing. [requests.http](../src/PriorAuth.Api/requests.http) holds the calls that need no token.
 
 For a demo to people who are not developers, run `dotnet run --project samples/PriorAuth.ClinicDemo` instead and open http://localhost:5030. It does the same steps from a browser page; the README's "Demo for management" section has the script.
 
@@ -64,6 +64,10 @@ dotnet ef migrations add NameOfTheChange --project src/PriorAuth.Api -o Data/Mig
 | `Plan:TimeZone` | `America/Los_Angeles` | The plan's time zone. "Today" for approvals, authorization numbers and CRD answers is the date there. An unknown zone stops start-up. |
 | `Plan:Name` | `Behavioral Health Plan (synthetic)` | The name shown as the source of CRD cards |
 | `AllowedHosts` | `localhost;127.0.0.1;[::1]` | Host names the server answers to. Any other `Host` header is refused. A real deployment must set its own public host name here. |
+| `StaffSignIn:Mode` | `Development` in the Development environment, otherwise `Windows` | How plan staff sign in. `Windows` uses Windows Integrated Authentication (Kerberos or NTLM). `Development` shows a page to pick a test user and stops start-up in any other environment. |
+| `StaffSignIn:Groups:Coordinator`, `:LicensedClinician`, `:Physician`, `:Admin` | empty | The Active Directory group for each role, for example `COUNTY\PA-Clinicians`. A role whose group is empty is given to no one. |
+| `StaffSignIn:TestUsers` | five test users in Development | Development only: each has an `Account`, a `DisplayName` and `Roles`. |
+| `DenialReasons` | five reasons | The reasons a denial may give, each a `Code` and a `Text`. Start-up stops if the list is empty or repeats a code. |
 | `Auth:PublicBaseUrl` | none | The public https address, for example `https://pa.example.gov`. Required outside Development: start-up fails if it is missing or is not an absolute https URL. Token audiences and published addresses use it, never the caller's `Host` header. |
 
 The commands above pass `--environment Development` after the `--`. Without it, `dotnet run --no-launch-profile` runs in the Production environment and stops at start-up asking for `Auth:PublicBaseUrl`. Only in Development does the server fall back to the address the caller used. Put the setting after the `--` too: `dotnet run` keeps some options, including `--environment`, for itself when they come before it.
@@ -109,29 +113,34 @@ Every error from `/fhir`, including 401, 403, 404 for an unknown address and 405
 
 Every response carries security headers: a Content Security Policy, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`. Responses from `/fhir`, `/internal`, `/auth` and `/cds-services` also carry `Cache-Control: no-store`, because they can hold member information. The server does not announce itself in a `Server` header.
 
-### For agency staff
+### For plan staff
 
-These are a stopgap until staff sign-in exists. They answer only when all of these hold, and otherwise return 403:
+Staff use the portal at `/`. The same actions are available as JSON under `/internal`, for scripts and tests. Both need a staff sign-in with the right role, and a `POST` also needs the header `X-Requested-By: prior-auth-reviewer`, which a form or link on another site cannot send. Without a sign-in they answer 401; without the role, 403.
 
-- The connection comes from the server's own machine.
-- No proxy forwarded it (no `X-Forwarded-For`, `Forwarded`, `X-Forwarded-Host` or `X-Real-IP` header).
-- The `Host` header is `localhost`, `127.0.0.1` or `[::1]`.
-- For a `POST`, the header `X-Requested-By: prior-auth-reviewer` is present. The reviewer page sends it; a form or link on another site cannot.
-
-On a shared machine (terminal server, Citrix) every signed-in user counts as local, so do not run it there.
-
-| Method and path | Body |
+| Role | May |
 |---|---|
-| `GET /internal/requests?status=open&skip=0&take=50` | `status` is `open` (default), `decided` or `all`. `take` defaults to 50, at most 200. Newest first. |
-| `POST /internal/requests/{id}/approve` | `{ "through": "2027-02-28", "reviewer": "name" }` |
-| `POST /internal/requests/{id}/deny` | `{ "reason": "text", "reviewer": "name" }` |
-| `POST /internal/requests/{id}/request-information` | `{ "missing": "text", "reviewer": "name" }` |
-| `GET /internal/requests/{id}/documents/{documentId}` | Downloads one supporting document |
-| `GET /internal/clients` | |
-| `POST /internal/clients` | `{ "name": "provider name", "jwks": { "keys": [ ... ] } }` |
-| `POST /internal/clients/{clientId}/deactivate` | |
+| Coordinator | See the queue, claim and release requests, assign them to others, ask the provider for more information |
+| Licensed clinician | See the queue, claim, approve, approve with changes, deny, ask for more information |
+| Physician | As a licensed clinician, and the only role that decides concurrent reviews (inpatient, PHF) |
+| Admin | Register and switch off provider systems. Does not see the queue. |
 
-A broken rule returns status 422 with the reason in `detail`. A decision on a request someone else changed a moment before returns 409; reload and check before deciding again.
+A request claimed by one person cannot be decided by another until it is released; a coordinator may release or reassign it. A decision releases it.
+
+| Method and path | Role | Body |
+|---|---|---|
+| `GET /internal/requests?status=open&skip=0&take=50` | queue | `status` is `open` (default), `decided` or `all`. `take` defaults to 50, at most 200. Newest first. |
+| `POST /internal/requests/{id}/claim` · `/release` | queue | none |
+| `POST /internal/requests/{id}/assign` | coordinator | `{ "account": "COUNTY\\jdoe" }`. The person must have signed in to the portal once. |
+| `POST /internal/requests/{id}/approve` | clinician or physician | `{ "through": "2027-02-28" }` |
+| `POST /internal/requests/{id}/approve-with-changes` | clinician or physician | `{ "through": "2027-02-28", "change": "6 hours a week, not 10" }`. PAS answers review action A6, Modified. |
+| `POST /internal/requests/{id}/deny` | clinician or physician | `{ "reasonCode": "not-medically-necessary", "reason": "text" }`. The code must be in `DenialReasons`. |
+| `POST /internal/requests/{id}/request-information` | queue | `{ "missing": "text" }` |
+| `GET /internal/requests/{id}/documents/{documentId}` | queue | Downloads one supporting document |
+| `GET /internal/clients` | admin | |
+| `POST /internal/clients` | admin | `{ "name": "provider name", "contactEmail": "optional", "jwks": { "keys": [ ... ] } }` |
+| `POST /internal/clients/{clientId}/deactivate` | admin | |
+
+Decisions are recorded against the signed-in account, never a typed name. A broken rule returns status 422 with the reason in `detail`. An action on a request someone else changed a moment before returns 409; reload and check before acting again.
 
 ## Automated tests
 
@@ -139,17 +148,19 @@ A broken rule returns status 422 with the reason in `detail`. A decision on a re
 dotnet test
 ```
 
-The tests start the real application against a temporary database and call it over HTTP, signing in the way a provider system would. There are 233 (counting each case of a test that runs with several inputs). All but the rule checks in [DomainRuleTests.cs](../tests/PriorAuth.Api.Tests/DomainRuleTests.cs) and [ServiceRuleTests.cs](../tests/PriorAuth.Api.Tests/ServiceRuleTests.cs), which need no web server, go through HTTP. They are in [PriorAuthApiTests.cs](../tests/PriorAuth.Api.Tests/PriorAuthApiTests.cs), [RequestIntegrityTests.cs](../tests/PriorAuth.Api.Tests/RequestIntegrityTests.cs), [ServerBoundaryTests.cs](../tests/PriorAuth.Api.Tests/ServerBoundaryTests.cs), [SignInTests.cs](../tests/PriorAuth.Api.Tests/SignInTests.cs), [SupportingDocumentTests.cs](../tests/PriorAuth.Api.Tests/SupportingDocumentTests.cs), [CrdAndDtrTests.cs](../tests/PriorAuth.Api.Tests/CrdAndDtrTests.cs), [ReviewRuleTests.cs](../tests/PriorAuth.Api.Tests/ReviewRuleTests.cs), [ServiceRuleTests.cs](../tests/PriorAuth.Api.Tests/ServiceRuleTests.cs) and [DomainRuleTests.cs](../tests/PriorAuth.Api.Tests/DomainRuleTests.cs). Each test name is a sentence stating a behaviour:
+The tests start the real application against a temporary database and call it over HTTP, signing in the way a provider system would. There are 259 (counting each case of a test that runs with several inputs). All but the rule checks in [DomainRuleTests.cs](../tests/PriorAuth.Api.Tests/DomainRuleTests.cs), [ServiceRuleTests.cs](../tests/PriorAuth.Api.Tests/ServiceRuleTests.cs), [StaffRuleTests.cs](../tests/PriorAuth.Api.Tests/StaffRuleTests.cs) and two sign-in set-up checks in [PortalTests.cs](../tests/PriorAuth.Api.Tests/PortalTests.cs), which need no web server, go through HTTP. Test clients sign in as the Development test users. They are in [PriorAuthApiTests.cs](../tests/PriorAuth.Api.Tests/PriorAuthApiTests.cs), [RequestIntegrityTests.cs](../tests/PriorAuth.Api.Tests/RequestIntegrityTests.cs), [ServerBoundaryTests.cs](../tests/PriorAuth.Api.Tests/ServerBoundaryTests.cs), [SignInTests.cs](../tests/PriorAuth.Api.Tests/SignInTests.cs), [SupportingDocumentTests.cs](../tests/PriorAuth.Api.Tests/SupportingDocumentTests.cs), [CrdAndDtrTests.cs](../tests/PriorAuth.Api.Tests/CrdAndDtrTests.cs), [ReviewRuleTests.cs](../tests/PriorAuth.Api.Tests/ReviewRuleTests.cs), [PortalTests.cs](../tests/PriorAuth.Api.Tests/PortalTests.cs), [StaffRuleTests.cs](../tests/PriorAuth.Api.Tests/StaffRuleTests.cs), [ServiceRuleTests.cs](../tests/PriorAuth.Api.Tests/ServiceRuleTests.cs) and [DomainRuleTests.cs](../tests/PriorAuth.Api.Tests/DomainRuleTests.cs). Each test name is a sentence stating a behaviour:
 
 | Area | Behaviours covered |
 |---|---|
 | Requirements list | States the rule and documentation for a listed service; is empty for an unlisted one. |
 | Submitting | A request is pended; an unlisted service is answered "not required"; a resend does not create a second request, even when two copies arrive at once; invalid FHIR and non-preauthorization claims are rejected; a request for two services, a Bundle whose first entry is not the Claim, an identifier over 200 characters and another resource type are refused with 400; the Bundle may be wrapped in `Parameters`. |
 | Request identity | A request number cannot be reused for another member or another service; an inquiry must match the identifier system too; an inquiry with no identifier is refused; a plain retry does not answer an information request; document contents are stored once, not also inside the kept Bundle. |
-| Decisions | An approval returns an end date and number; an approval cannot end in the past; an approval through the plan's today is allowed in the evening; a denial needs a reason and carries no number or end date; an information request keeps the request open; a decided request cannot be decided again; approve and deny at the same moment cannot both succeed; every step is in the history and moves the version on. |
+| Decisions | An approval returns an end date and number; an approval cannot end in the past; an approval through the plan's today is allowed in the evening; a denial needs a reason and carries no number or end date; an information request keeps the request open; a decided request cannot be decided again; approve and deny at the same moment cannot both succeed; every step is in the history, with the person who took it, and moves the version on; an approval with changes is answered A6, Modified, with the change. |
+| Staff roles | A coordinator cannot approve or deny but can ask for information; a licensed clinician decides and is recorded by account; only a physician decides a concurrent review; an admin cannot work the queue; a request claimed by someone else cannot be decided; the holder can decide it; only a coordinator assigns, and only to someone who works the queue; a claim is released by its holder or a coordinator only; approving with changes needs a change; a denial needs a reason code and text; a decision releases the claim. |
+| Portal | A clinician claims and approves on the request page; a coordinator sees no decision forms; a decision from an out-of-date page is refused; a denial needs a reason from the plan's list; an admin lands on the provider systems page; a provider system is registered with a contact email and a bad one is refused; the internal endpoints apply the same role rules; roles come only from the configured groups; test-user sign-in is refused outside Development. |
 | Reading | A response can be read by id; an unknown request returns 404; reading the same answer twice gives the same created time and a cheap 304; every reference in the answer resolves inside it; the answer names the line the provider numbered. |
 | Review queue | Shows open requests by default and decided ones on request; questionnaire answers show the plan's wording and flag gaps. |
-| Server boundary | The review queue refuses a caller on another machine or a request forwarded by a proxy; another host name is refused; an internal change without the review page header is refused; answers are never cached and pages cannot be framed; XML gets 406; a non-JSON body gets 415; errors without a body still come back as `OperationOutcome`; the capability statement describes the instance and the questionnaire endpoints; `/health` reports healthy. |
+| Server boundary | The review queue needs a staff sign-in; the portal sends someone not signed in to sign in; an admin cannot see the queue; someone who works the queue cannot register provider systems; there is no test-user sign-in for an unconfigured account; test-user sign-in never redirects to another site; another host name is refused; an internal change without the portal header is refused; answers are never cached and pages cannot be framed; XML gets 406; a non-JSON body gets 415; errors without a body still come back as `OperationOutcome`; the capability statement describes the instance and the questionnaire endpoints; `/health` reports healthy. |
 | Service list | A level modifier picks that level; no modifiers matches the entry that needs none when no other entry for the code is reviewed; falling back to a no-review entry while a sibling is reviewed, two equally specific entries that both fit, and a reviewed code without its modifier are all ambiguous; modifiers the list does not use do not stop a match; codes and modifiers in the list are trimmed like the ones sent; without modifiers, entries that disagree are ambiguous and entries that agree are definite; a code only matches in its own code system; the first listed coding decides the service; a well-formed unlisted code is "not listed" and an unrecognisable one is "unrecognised"; codes ignore case and spaces. Start-up stops on: a malformed code, the same code and modifiers twice, a reviewed service without a questionnaire or with one that does not exist, a no-review service with a questionnaire, a questionnaire id not starting with a letter, colliding choice options or an unknown question type. "Today" is the plan's local date. |
 | Review rules | A residential level with its modifier is pended for prior authorization; the same code without a modifier is pended for a person to check; a listed service the plan may not prior-authorize is answered not required; an ambiguous service is pended with a note naming the entries; an inpatient admission is pended for concurrent review; an unlisted service needs none; an unrecognisable code is pended for a person to check. |
 | Getting a token | A valid RS384 or ES384 assertion gets a 300-second token; refused when signed with another key, from an unregistered or deactivated client, addressed to another server, expired, too long-lived, issued in the future, reused (even by two requests at once), without a `kid` or with one that matches no key, with a `typ` other than JWT, or asking for no supported scope; refusals do not reveal whether a client id exists; only the key named by `kid` is tried; token responses are never cached; a foreign `Host` header cannot change the audience; SMART v1 and v2 scope spellings both work; discovery lists what SMART requires; the public address must be https outside Development. |

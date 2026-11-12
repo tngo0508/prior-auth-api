@@ -1,4 +1,3 @@
-using System.Net;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
@@ -78,28 +77,19 @@ public static class AuthSetup
         (user.FindFirstValue("scope") ?? "").Split(' ').Contains(scope);
 
     /// <summary>
-    /// Interim guard for the internal endpoints until staff sign-in exists (issue #2). They only answer when all of these hold:
-    /// the connection comes from this machine; no proxy forwarded it (a proxy on the same machine would make every caller look local);
-    /// the Host header names this machine (defeats DNS rebinding from a web page); and, for changes, the reviewer page's own
-    /// header is present (defeats a cross-site form). On a shared host (terminal server, Citrix) every signed-in user still counts
-    /// as local, so do not run it there.
+    /// Internal endpoints: only signed-in staff who meet the policy (a role from <see cref="StaffSignIn"/>).
+    /// A change must also carry the review page's header, which a cross-site form or link cannot add.
     /// </summary>
-    public static RouteGroupBuilder LocalCallersOnly(this RouteGroupBuilder group)
+    public static RouteGroupBuilder StaffOnly(this RouteGroupBuilder group, string policy)
     {
+        group.RequireAuthorization(policy);
         group.AddEndpointFilter(async (context, next) =>
         {
             var http = context.HttpContext;
-            var address = http.Connection.RemoteIpAddress;
-            var forwarded = http.Request.Headers.ContainsKey("X-Forwarded-For") || http.Request.Headers.ContainsKey("Forwarded")
-                            || http.Request.Headers.ContainsKey("X-Forwarded-Host") || http.Request.Headers.ContainsKey("X-Real-IP");
-            var host = http.Request.Host.Host;
-            var localHost = host is "localhost" or "127.0.0.1" or "::1" or "[::1]";
             var isChange = !HttpMethods.IsGet(http.Request.Method) && !HttpMethods.IsHead(http.Request.Method);
-            var hasPageHeader = http.Request.Headers[InternalRequestHeader] == InternalRequestHeaderValue;
-
-            return address is not null && IPAddress.IsLoopback(address) && !forwarded && localHost && (!isChange || hasPageHeader)
-                ? await next(context)
-                : Results.StatusCode(StatusCodes.Status403Forbidden);
+            return isChange && http.Request.Headers[InternalRequestHeader] != InternalRequestHeaderValue
+                ? Results.StatusCode(StatusCodes.Status403Forbidden)
+                : await next(context);
         });
         return group;
     }

@@ -190,7 +190,7 @@ public class RequestIntegrityTests(ApiFactory factory) : IClassFixture<ApiFactor
         var document = Document("Assessment", "text/plain", "Synthetic assessment.");
         var bundle = PasFixtures.RequestBundle(NewId(), extraEntries: document);
         var id = ClaimResponse(await Submit(bundle)).GetProperty("id").GetString()!;
-        await _staff.PostAsJsonAsync($"/internal/requests/{id}/request-information", new { missing = "Client plan", reviewer = "Test Reviewer" });
+        await _staff.PostAsJsonAsync($"/internal/requests/{id}/request-information", new { missing = "Client plan" });
 
         await Submit(bundle); // the same Bundle again, nothing new in it
 
@@ -205,8 +205,8 @@ public class RequestIntegrityTests(ApiFactory factory) : IClassFixture<ApiFactor
         for (var round = 0; round < 5; round++)
         {
             var id = ClaimResponse(await Submit(PasFixtures.RequestBundle(NewId()))).GetProperty("id").GetString()!;
-            var approve = _staff.PostAsJsonAsync($"/internal/requests/{id}/approve", new { through = "2099-12-31", reviewer = "Reviewer A" });
-            var deny = _staff.PostAsJsonAsync($"/internal/requests/{id}/deny", new { reason = "Not medically necessary", reviewer = "Reviewer B" });
+            var approve = _staff.PostAsJsonAsync($"/internal/requests/{id}/approve", new { through = "2099-12-31" });
+            var deny = _staff.PostAsJsonAsync($"/internal/requests/{id}/deny", new { reasonCode = "not-medically-necessary", reason = "Not medically necessary" });
             var results = await Task.WhenAll(approve, deny);
 
             Assert.Single(results, r => r.StatusCode == HttpStatusCode.OK);
@@ -234,7 +234,7 @@ public class RequestIntegrityTests(ApiFactory factory) : IClassFixture<ApiFactor
     public async Task The_queue_shows_open_requests_by_default_and_decided_ones_on_request()
     {
         var id = ClaimResponse(await Submit(PasFixtures.RequestBundle(NewId()))).GetProperty("id").GetString()!;
-        await _staff.PostAsJsonAsync($"/internal/requests/{id}/deny", new { reason = "Not medically necessary", reviewer = "Test Reviewer" });
+        await _staff.PostAsJsonAsync($"/internal/requests/{id}/deny", new { reasonCode = "not-medically-necessary", reason = "Not medically necessary" });
 
         var open = await _staff.GetFromJsonAsync<JsonElement>("/internal/requests?take=200");
         var decided = await _staff.GetFromJsonAsync<JsonElement>("/internal/requests?status=decided&take=200");

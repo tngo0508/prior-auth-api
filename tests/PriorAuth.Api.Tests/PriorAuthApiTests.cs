@@ -23,22 +23,49 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
 
     private string SqlitePath => Path.Combine(Path.GetTempPath(), _name + ".db");
 
-    /// <summary>A test sets this header to make its request look as if it came from another machine.</summary>
-    public const string RemoteAddressHeader = "X-Test-Remote-Address";
+    /// <summary>The test user with every staff role, from appsettings.Development.json. Clients sign in as this user unless a test picks another.</summary>
+    public const string AllRolesAccount = @"DEV\test.reviewer";
+    public const string AllRolesName = "Test Reviewer (all roles)";
+    public const string CoordinatorAccount = @"DEV\casey.coordinator";
+    public const string ClinicianAccount = @"DEV\lee.clinician";
+    public const string PhysicianAccount = @"DEV\pat.physician";
+    public const string AdminAccount = @"DEV\ari.admin";
 
     protected override void ConfigureClient(HttpClient client)
     {
         base.ConfigureClient(client);
-        // The reviewer page sends this on every internal change; the test clients act as that page.
+        // The portal sends this on every internal change; the test clients act as the portal.
         client.DefaultRequestHeaders.Add(PriorAuth.Api.Auth.AuthSetup.InternalRequestHeader, PriorAuth.Api.Auth.AuthSetup.InternalRequestHeaderValue);
+        client.DefaultRequestHeaders.Add("Cookie", SignInCookie(AllRolesAccount));
     }
+
+    /// <summary>A client signed in to the portal as one of the Development test users.</summary>
+    public HttpClient SignedInAs(string account)
+    {
+        var client = CreateClient();
+        client.DefaultRequestHeaders.Remove("Cookie");
+        client.DefaultRequestHeaders.Add("Cookie", SignInCookie(account));
+        return client;
+    }
+
+    /// <summary>A client with no staff sign-in and no portal header: what anyone else on the network looks like. It does not follow redirects.</summary>
+    public HttpClient Anonymous() => Server.CreateClient();
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _signInCookies = new();
+
+    // Signs in through the real Development sign-in, on a separate client: ConfigureClient runs before the
+    // client may send anything. The cookie then travels as a default header.
+    private string SignInCookie(string account) => _signInCookies.GetOrAdd(account, _ =>
+    {
+        using var http = Server.CreateClient();
+        var response = http.PostAsync(PriorAuth.Api.Auth.StaffSignIn.DevSignInPath,
+            new FormUrlEncodedContent([new("account", account), new("returnUrl", "/")])).GetAwaiter().GetResult();
+        if (response.StatusCode != HttpStatusCode.Redirect) throw new InvalidOperationException($"Test sign-in as {account} answered {(int)response.StatusCode}.");
+        return response.Headers.GetValues("Set-Cookie").Select(c => c.Split(';')[0]).Single(c => c.StartsWith("priorauth-dev-staff="));
+    });
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        // The in-memory test server has no network connection, so it has no remote address. Give it the loopback
-        // address a caller on this machine would have, unless the test asks to look like a remote caller.
-        builder.ConfigureServices(services => services.AddTransient<Microsoft.AspNetCore.Hosting.IStartupFilter, TestRemoteAddress>());
-
         if (SqlServer is null)
         {
             builder.UseSetting("ConnectionStrings:PriorAuth", $"Data Source={SqlitePath};Pooling=False");
@@ -61,20 +88,6 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
         base.Dispose(disposing);
         if (File.Exists(SqlitePath)) File.Delete(SqlitePath);
     }
-}
-
-internal sealed class TestRemoteAddress : Microsoft.AspNetCore.Hosting.IStartupFilter
-{
-    public Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> Configure(Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> next) => app =>
-    {
-        app.Use(async (context, nextMiddleware) =>
-        {
-            var pretend = context.Request.Headers[ApiFactory.RemoteAddressHeader].ToString();
-            context.Connection.RemoteIpAddress = pretend.Length > 0 ? IPAddress.Parse(pretend) : context.Connection.RemoteIpAddress ?? IPAddress.Loopback;
-            await nextMiddleware();
-        });
-        next(app);
-    };
 }
 
 public class PriorAuthApiTests(ApiFactory factory) : IClassFixture<ApiFactory>, IAsyncLifetime
@@ -173,7 +186,7 @@ public class PriorAuthApiTests(ApiFactory factory) : IClassFixture<ApiFactory>, 
     {
         var requestId = NewRequestId();
         var id = (await Submit(requestId, "H2019")).GetProperty("id").GetString()!;
-        await _client.PostAsJsonAsync($"/internal/requests/{id}/request-information", new { missing = "Client plan", reviewer = "Test Reviewer" });
+        await _client.PostAsJsonAsync($"/internal/requests/{id}/request-information", new { missing = "Client plan" });
 
         var bundle = await (await _client.PostAsync("/fhir/Claim/$inquire", Fhir(RequestBundle(requestId, "H2019")))).Content.ReadFromJsonAsync<JsonElement>();
         var claimResponse = bundle.GetProperty("entry")[0].GetProperty("resource");
@@ -194,7 +207,7 @@ public class PriorAuthApiTests(ApiFactory factory) : IClassFixture<ApiFactory>, 
         var id = (await Submit(requestId, "H2019")).GetProperty("id").GetString()!;
         var through = PlanToday().AddDays(90);
 
-        var decision = await _client.PostAsJsonAsync($"/internal/requests/{id}/approve", new { through, reviewer = "Test Reviewer" });
+        var decision = await _client.PostAsJsonAsync($"/internal/requests/{id}/approve", new { through });
         var status = await Inquire(requestId);
 
         Assert.Equal(HttpStatusCode.OK, decision.StatusCode);
@@ -210,7 +223,7 @@ public class PriorAuthApiTests(ApiFactory factory) : IClassFixture<ApiFactory>, 
         var id = (await Submit(NewRequestId(), "H2019")).GetProperty("id").GetString()!;
         var yesterday = PlanToday().AddDays(-1);
 
-        var decision = await _client.PostAsJsonAsync($"/internal/requests/{id}/approve", new { through = yesterday, reviewer = "Test Reviewer" });
+        var decision = await _client.PostAsJsonAsync($"/internal/requests/{id}/approve", new { through = yesterday });
 
         Assert.Equal(HttpStatusCode.UnprocessableEntity, decision.StatusCode);
     }
@@ -221,7 +234,7 @@ public class PriorAuthApiTests(ApiFactory factory) : IClassFixture<ApiFactory>, 
         var requestId = NewRequestId();
         var id = (await Submit(requestId, "H2019")).GetProperty("id").GetString()!;
 
-        var decision = await _client.PostAsJsonAsync($"/internal/requests/{id}/deny", new { reason = "  ", reviewer = "Test Reviewer" });
+        var decision = await _client.PostAsJsonAsync($"/internal/requests/{id}/deny", new { reasonCode = "not-medically-necessary", reason = "  " });
         var status = await Inquire(requestId);
 
         Assert.Equal(HttpStatusCode.UnprocessableEntity, decision.StatusCode);
@@ -234,7 +247,7 @@ public class PriorAuthApiTests(ApiFactory factory) : IClassFixture<ApiFactory>, 
         var requestId = NewRequestId();
         var id = (await Submit(requestId, "H2019")).GetProperty("id").GetString()!;
 
-        await _client.PostAsJsonAsync($"/internal/requests/{id}/deny", new { reason = "Assessment is older than 12 months", reviewer = "Test Reviewer" });
+        await _client.PostAsJsonAsync($"/internal/requests/{id}/deny", new { reasonCode = "not-medically-necessary", reason = "Assessment is older than 12 months" });
         var status = await Inquire(requestId);
 
         Assert.Equal("A3", ReviewCode(status));
@@ -247,10 +260,10 @@ public class PriorAuthApiTests(ApiFactory factory) : IClassFixture<ApiFactory>, 
         var requestId = NewRequestId();
         var id = (await Submit(requestId, "H2019")).GetProperty("id").GetString()!;
 
-        await _client.PostAsJsonAsync($"/internal/requests/{id}/request-information", new { missing = "Client plan", reviewer = "Test Reviewer" });
+        await _client.PostAsJsonAsync($"/internal/requests/{id}/request-information", new { missing = "Client plan" });
         var status = await Inquire(requestId);
         var laterApproval = await _client.PostAsJsonAsync($"/internal/requests/{id}/approve",
-            new { through = PlanToday().AddDays(30), reviewer = "Test Reviewer" });
+            new { through = PlanToday().AddDays(30) });
 
         Assert.Equal("queued", status.GetProperty("outcome").GetString());
         Assert.Contains("Client plan", status.GetProperty("disposition").GetString());
@@ -261,10 +274,10 @@ public class PriorAuthApiTests(ApiFactory factory) : IClassFixture<ApiFactory>, 
     public async Task A_decided_request_cannot_be_decided_again()
     {
         var id = (await Submit(NewRequestId(), "H2019")).GetProperty("id").GetString()!;
-        await _client.PostAsJsonAsync($"/internal/requests/{id}/deny", new { reason = "Not medically necessary per assessment", reviewer = "Test Reviewer" });
+        await _client.PostAsJsonAsync($"/internal/requests/{id}/deny", new { reasonCode = "not-medically-necessary", reason = "Not medically necessary per assessment" });
 
         var second = await _client.PostAsJsonAsync($"/internal/requests/{id}/approve",
-            new { through = PlanToday().AddDays(30), reviewer = "Test Reviewer" });
+            new { through = PlanToday().AddDays(30) });
 
         Assert.Equal(HttpStatusCode.UnprocessableEntity, second.StatusCode);
     }
@@ -274,15 +287,16 @@ public class PriorAuthApiTests(ApiFactory factory) : IClassFixture<ApiFactory>, 
     {
         var requestId = NewRequestId();
         var id = (await Submit(requestId, "H2019")).GetProperty("id").GetString()!;
-        await _client.PostAsJsonAsync($"/internal/requests/{id}/request-information", new { missing = "Client plan", reviewer = "Reviewer A" });
-        await _client.PostAsJsonAsync($"/internal/requests/{id}/deny", new { reason = "Client plan never supplied", reviewer = "Reviewer B" });
+        await factory.SignedInAs(ApiFactory.CoordinatorAccount).PostAsJsonAsync($"/internal/requests/{id}/request-information", new { missing = "Client plan" });
+        await factory.SignedInAs(ApiFactory.ClinicianAccount).PostAsJsonAsync($"/internal/requests/{id}/deny", new { reasonCode = "not-medically-necessary", reason = "Client plan never supplied" });
 
         var queue = await _client.GetFromJsonAsync<JsonElement>("/internal/requests?status=all&take=200");
         var request = queue.EnumerateArray().Single(r => r.GetProperty("id").GetString() == id);
 
         var actors = request.GetProperty("history").EnumerateArray().Select(h => h.GetProperty("actor").GetString()!).ToArray();
-        Assert.Equal(["Example Clinic (synthetic)", "Reviewer A", "Reviewer B"], actors);
-        Assert.Equal("Reviewer B", request.GetProperty("decidedBy").GetString());
+        Assert.Equal(["Example Clinic (synthetic)", "Casey Coordinator (test)", "Lee Clinician (test)"], actors);
+        Assert.Equal("Lee Clinician (test)", request.GetProperty("decidedBy").GetString());
+        Assert.Equal(ApiFactory.ClinicianAccount, request.GetProperty("decidedByAccount").GetString());
     }
 
     // ---------- Reading ----------

@@ -8,17 +8,17 @@ sequenceDiagram
     participant EHR as Provider's EHR
     participant API as Prior Authorization API
     participant DB as Database
-    participant REV as Reviewer screen
+    participant REV as Staff portal
 
     EHR->>API: GET /requirements?code=H2019
     API-->>EHR: Needs approval, with the paperwork list
     EHR->>API: POST /fhir/Claim/$submit (Bundle with a Claim)
     API->>DB: Save the request as Pended
     API-->>EHR: ClaimResponse: queued, A4 (Pended)
-    REV->>API: GET /internal/requests
+    REV->>API: GET / (signed in with Windows)
     API-->>REV: The queue
-    REV->>API: POST /internal/requests/{id}/approve
-    API->>DB: Save the decision and a history entry, if the version is unchanged
+    REV->>API: Claim it, then Approve, on /requests/{id}
+    API->>DB: Save the decision, who made it and a history entry, if the version is unchanged
     EHR->>API: POST /fhir/Claim/$inquire
     API-->>EHR: ClaimResponse: complete, A1, end date, authorization number
 ```
@@ -96,11 +96,14 @@ Dates a person reads (whether an approval ends on or after today, the date in an
 flowchart TB
     subgraph Callers
         EHR["Provider's EHR"]
-        STAFF["Reviewer's browser"]
+        STAFF["Plan staff's browser<br/>(Windows sign-in)"]
     end
     subgraph App["PriorAuth.Api (ASP.NET Core, .NET 10)"]
         FE["Fhir/FhirEndpoints.cs<br/>metadata, requirements, submit, inquire, read"]
-        RE["Review/ReviewerEndpoints.cs<br/>queue, approve, deny, request information"]
+        PG["Pages/<br/>staff portal"]
+        RE["Review/ReviewerEndpoints.cs<br/>the same actions as JSON"]
+        DESK["Review/ReviewDesk.cs<br/>claim, assign, decide, ask for information"]
+        SIGN["Auth/StaffSignIn.cs<br/>Windows sign-in, roles from AD groups"]
         MAP["Fhir/PasMapper.cs<br/>FHIR to domain and back"]
         DOM["Domain/AuthorizationRequest.cs<br/>states and rules"]
         CAT["Domain/ServiceRequirement.cs<br/>the requirements list"]
@@ -111,14 +114,18 @@ flowchart TB
     DB[("SQLite in development,<br/>SQL Server in production")]
 
     EHR --> FE
-    STAFF --> RE
+    STAFF --> SIGN
+    SIGN --> PG
+    SIGN --> RE
+    PG --> DESK
+    RE --> DESK
     FE --> MAP
     FE --> CAT
     MAP --> DOM
-    RE --> DOM
-    RE --> CLK
+    DESK --> DOM
+    DESK --> CLK
     FE --> DATA
-    RE --> DATA
+    DESK --> DATA
     DATA --> DB
     CFG --> CAT
 ```
@@ -132,12 +139,13 @@ flowchart TB
 | [Fhir/PasMapper.cs](../src/PriorAuth.Api/Fhir/PasMapper.cs) | Reads what we need from the incoming FHIR `Bundle`, and builds the `ClaimResponse`. |
 | [Fhir/FhirJson.cs](../src/PriorAuth.Api/Fhir/FhirJson.cs) | Reads and writes FHIR JSON with the Firely SDK, and builds FHIR error responses. |
 | [Fhir/FhirEndpoints.cs](../src/PriorAuth.Api/Fhir/FhirEndpoints.cs) | The URLs a provider's EHR calls. |
-| [Review/ReviewerEndpoints.cs](../src/PriorAuth.Api/Review/ReviewerEndpoints.cs) | The URLs the reviewer screen calls. |
+| [Review/ReviewDesk.cs](../src/PriorAuth.Api/Review/ReviewDesk.cs) | Every action staff take on a request (claim, assign, decide, ask for information), shared by the portal pages and the internal endpoints. |
+| [Review/ReviewerEndpoints.cs](../src/PriorAuth.Api/Review/ReviewerEndpoints.cs) | The same actions as JSON under `/internal`. |
 | [Data/PriorAuthDb.cs](../src/PriorAuth.Api/Data/PriorAuthDb.cs) | The database mapping. |
 | [Data/DatabaseHealthCheck.cs](../src/PriorAuth.Api/Data/DatabaseHealthCheck.cs) | The database check behind `GET /health`. |
-| [Auth/](../src/PriorAuth.Api/Auth) | Sign-in for provider systems. See [5. Sign-in](05-sign-in.md). |
+| [Auth/](../src/PriorAuth.Api/Auth) | Sign-in for provider systems (see [5. Sign-in](05-sign-in.md)), and staff sign-in in [StaffSignIn.cs](../src/PriorAuth.Api/Auth/StaffSignIn.cs). |
 | [service-requirements.json](../src/PriorAuth.Api/service-requirements.json) | The plan's service list: each service's code, code system, modifiers, review rule and questionnaire, plus the shared questionnaires. See [9. The service list](09-service-list.md). A broken entry (a malformed code, the same code and modifiers twice, a reviewed service without a questionnaire, a question id used twice, two answer options with the same code) stops the service at start-up with a message naming the problem. |
-| [wwwroot/index.html](../src/PriorAuth.Api/wwwroot/index.html) | The reviewer screen. |
+| [Pages/](../src/PriorAuth.Api/Pages) | The staff portal (Razor Pages): the review queue, a request with its decision forms, and provider systems. |
 
 ## What is stored
 
@@ -164,9 +172,16 @@ erDiagram
         string Sha256
         datetime ReceivedAtUtc
     }
+    StaffMember {
+        string Account PK
+        string DisplayName
+        string Roles
+        datetime LastSeenAtUtc
+    }
     ProviderClient {
         string ClientId PK
         string Name
+        string ContactEmail
         string JwksJson
         bool Active
         datetime RegisteredAtUtc
@@ -184,12 +199,18 @@ erDiagram
         string ServiceName
         string SubmittedBundleJson
         datetime ReceivedAtUtc
+        string ReviewType
         string Status
         string AuthorizationNumber
         date AuthorizedThrough
+        string Modification
+        string DenialReasonCode
         string Reason
+        string AssignedTo
+        string AssignedToName
         datetime DecidedAtUtc
         string DecidedBy
+        string DecidedByAccount
         datetime LastChangedAtUtc
         int Version
     }
@@ -206,11 +227,19 @@ The provider's original FHIR `Bundle` is kept in `SubmittedBundleJson`, so the r
 
 The three columns `ClientId`, `ProviderRequestSystem` and `ProviderRequestId` together are unique: that is what makes a resend find the first request. On SQL Server they are compared exactly, so `REQ-1` and `req-1` are different requests. `Version` goes up on every change and is what the database checks to refuse a decision made on an out-of-date copy.
 
-## The reviewer screen
+`StaffMember` is not linked to requests. It lists the people who have signed in to the portal, so a coordinator can assign a request to someone; the app does not read the Active Directory user list. `AssignedTo` and `DecidedByAccount` hold sign-in accounts such as `COUNTY\jdoe`.
 
-![Reviewer queue showing a pended request with a document from the provider and its history](images/review-queue.jpg)
+## The staff portal
 
-The screen is a single page served by the same app. It lists open requests newest first (decided ones on request), shows the documents the provider sent as download links, and lets a reviewer approve, deny or ask for information. When a rule is broken, for example a denial with no reason, the server refuses and the page shows the server's message. If someone else changed the request after the page loaded it, the server refuses with 409 and the reviewer reloads.
+![A request in the staff portal, claimed by a licensed clinician, with the forms to approve, approve with changes, deny or ask for more information](images/portal-request.jpg)
+
+The portal is a set of Razor Pages served by the same app. Plan staff sign in with Windows; what they see depends on their roles, which come from Active Directory groups.
+
+- **The queue** (`/`) lists requests waiting for a decision or for the provider, oldest first, with who is working on each. Other tabs show the person's own requests, decided ones, and all.
+- **A request** (`/requests/{id}`) shows what was asked, the documents the provider sent as download links, and the history. Anyone who works the queue can claim it; a coordinator can assign it to someone or release it. A licensed clinician or physician can approve, approve with changes, or deny with a reason from the plan's list; only a physician decides a concurrent review. Anyone who works the queue can ask the provider for more information.
+- **Provider systems** (`/providers`) is for admins: register a provider's system with its public keys, or switch one off.
+
+When a rule is broken, for example a coordinator trying to approve, the page shows why and nothing changes. If someone else changed the request after the page was loaded, the action is refused and the page shows the request as it is now.
 
 ## How FHIR maps to the domain
 

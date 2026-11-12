@@ -68,7 +68,7 @@ public class SupportingDocumentTests(ApiFactory factory) : IClassFixture<ApiFact
     {
         var requestId = NewRequestId();
         var id = await Submit(requestId);
-        await _staff.PostAsJsonAsync($"/internal/requests/{id}/request-information", new { missing = "Client plan", reviewer = "Test Reviewer" });
+        await _staff.PostAsJsonAsync($"/internal/requests/{id}/request-information", new { missing = "Client plan" });
 
         var resent = await Post(requestId, Document("Client plan", "application/pdf", [37, 80, 68, 70]));
         var entry = await QueueEntry(id);
@@ -84,7 +84,7 @@ public class SupportingDocumentTests(ApiFactory factory) : IClassFixture<ApiFact
     {
         var requestId = NewRequestId();
         var id = await Submit(requestId);
-        await _staff.PostAsJsonAsync($"/internal/requests/{id}/request-information", new { missing = "Client plan", reviewer = "Test Reviewer" });
+        await _staff.PostAsJsonAsync($"/internal/requests/{id}/request-information", new { missing = "Client plan" });
 
         await Post(requestId);
 
