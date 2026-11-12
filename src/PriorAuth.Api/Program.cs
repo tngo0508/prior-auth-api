@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using PriorAuth.Api.Auth;
 using PriorAuth.Api.Crd;
@@ -22,6 +23,8 @@ builder.Services.AddSingleton<PlanClock>();
 builder.Services.AddSingleton(services => new ServiceRequirementCatalog(
     services.GetRequiredService<IConfiguration>().GetSection("ServiceRequirements").Get<ServiceRequirement[]>() ?? []));
 builder.Services.AddProviderSignIn();
+builder.Services.AddHealthChecks().AddCheck<DatabaseHealthCheck>("database");
+builder.WebHost.ConfigureKestrel(kestrel => kestrel.AddServerHeader = false);
 
 var app = builder.Build();
 
@@ -33,18 +36,60 @@ app.Services.GetRequiredService<PlanClock>();
 using (var scope = app.Services.CreateScope())
 {
     // SQL Server: apply any migrations that have not been applied yet.
-    // SQLite (local development and tests): create the schema from the model.
+    // SQLite (local development and tests): create the schema from the model. It is never upgraded: delete the file after model changes.
     var database = scope.ServiceProvider.GetRequiredService<PriorAuthDb>().Database;
     if (database.IsSqlServer()) database.Migrate(); else database.EnsureCreated();
 }
 
 // An unexpected failure is logged in full on the server; the caller gets a FHIR error with no internals in it.
+// A request the server refused to read (too large, malformed HTTP) keeps its own status, so a client does not retry it forever.
 app.UseExceptionHandler(handler => handler.Run(async context =>
 {
-    context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-    await context.RequestServices.GetRequiredService<FhirJson>()
-        .Problem("The server could not process the request. Try again later.", StatusCodes.Status500InternalServerError)
-        .ExecuteAsync(context);
+    var failure = context.Features.Get<IExceptionHandlerFeature>()?.Error;
+    var (status, message) = failure is BadHttpRequestException bad
+        ? (bad.StatusCode, bad.StatusCode == StatusCodes.Status413PayloadTooLarge
+            ? $"The request body is too large. The limit is {FhirEndpoints.MaxSubmitBytes / (1024 * 1024)} MB."
+            : "The request could not be read.")
+        : (StatusCodes.Status500InternalServerError, "The server could not process the request. Try again later.");
+    context.Response.StatusCode = status;
+    await context.RequestServices.GetRequiredService<FhirJson>().Problem(message, status).ExecuteAsync(context);
+}));
+
+// Responses carry member information: never cache them, never let a page frame them, never let a browser guess types.
+app.Use(async (context, next) =>
+{
+    var headers = context.Response.Headers;
+    headers.XContentTypeOptions = "nosniff";
+    headers["Referrer-Policy"] = "no-referrer";
+    headers.XFrameOptions = "DENY";
+    headers.ContentSecurityPolicy = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
+    var path = context.Request.Path;
+    if (path.StartsWithSegments("/fhir") || path.StartsWithSegments("/internal") || path.StartsWithSegments("/auth") || path.StartsWithSegments("/cds-services"))
+    {
+        headers.CacheControl = "no-store";
+        headers.Pragma = "no-cache";
+    }
+    await next();
+});
+
+// The FHIR API speaks FHIR JSON only. Say so plainly instead of answering an XML request with JSON.
+app.UseWhen(context => context.Request.Path.StartsWithSegments("/fhir"), fhirApp => fhirApp.Use(async (context, next) =>
+{
+    var fhir = context.RequestServices.GetRequiredService<FhirJson>();
+    var format = context.Request.Query["_format"].ToString();
+    var accept = context.Request.Headers.Accept.ToString();
+    if ((format.Length > 0 && !FhirMediaTypes.IsJson(format)) || (accept.Length > 0 && !FhirMediaTypes.AcceptsJson(accept)))
+    {
+        await fhir.Problem("This server returns FHIR JSON only (application/fhir+json).", StatusCodes.Status406NotAcceptable).ExecuteAsync(context);
+        return;
+    }
+    var hasBody = context.Request.ContentLength > 0 || context.Request.Headers.TransferEncoding.Count > 0;
+    if (HttpMethods.IsPost(context.Request.Method) && hasBody && !FhirMediaTypes.IsJson(context.Request.ContentType ?? ""))
+    {
+        await fhir.Problem("Send the body as application/fhir+json.", StatusCodes.Status415UnsupportedMediaType).ExecuteAsync(context);
+        return;
+    }
+    await next();
 }));
 
 app.UseDefaultFiles();
@@ -52,6 +97,22 @@ app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();
 
+// An error with no body (unknown address, wrong method) still gets an explanation; on the FHIR API, as an OperationOutcome.
+app.UseStatusCodePages(async context =>
+{
+    var http = context.HttpContext;
+    if (!http.Request.Path.StartsWithSegments("/fhir")) return;
+    var status = http.Response.StatusCode;
+    var message = status switch
+    {
+        StatusCodes.Status404NotFound => $"There is no FHIR endpoint at {http.Request.Path}.",
+        StatusCodes.Status405MethodNotAllowed => $"{http.Request.Method} is not supported at {http.Request.Path}.",
+        _ => $"The request was refused ({status}).",
+    };
+    await http.RequestServices.GetRequiredService<FhirJson>().Problem(message, status).ExecuteAsync(http);
+});
+
+app.MapHealthChecks("/health");
 app.MapTokenEndpoint();
 app.MapFhirEndpoints();
 app.MapCrdEndpoints();

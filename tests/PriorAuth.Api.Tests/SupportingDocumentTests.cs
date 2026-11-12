@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
@@ -123,7 +123,7 @@ public class SupportingDocumentTests(ApiFactory factory) : IClassFixture<ApiFact
     }
 
     private async Task<JsonElement> QueueEntry(string id) =>
-        (await _staff.GetFromJsonAsync<JsonElement>("/internal/requests")).EnumerateArray().Single(r => r.GetProperty("id").GetString() == id);
+        (await _staff.GetFromJsonAsync<JsonElement>("/internal/requests?status=all&take=200")).EnumerateArray().Single(r => r.GetProperty("id").GetString() == id);
 
     private static string RequestBundle(string requestId, string[] documentEntries) =>
         PasFixtures.RequestBundle(requestId, extraEntries: documentEntries);
