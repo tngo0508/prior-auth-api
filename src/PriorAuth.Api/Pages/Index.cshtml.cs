@@ -13,13 +13,14 @@ public class IndexModel(PriorAuthDb db, PlanClock clock, ServiceRequirementCatal
     public const int PageSize = 100;
 
     public record Row(string Id, DateTime ReceivedLocal, string MemberName, string ServiceCode, string ServiceName, string Program,
-        ReviewType? ReviewType, AuthorizationStatus Status, string? AssignedToName, bool Mine);
+        ReviewType? ReviewType, AuthorizationStatus Status, string? AssignedToName, bool Mine, TimeSpan Age);
 
     [BindProperty(SupportsGet = true)]
     public string Show { get; set; } = "waiting";
 
     public IReadOnlyList<Row> Rows { get; private set; } = [];
     public int WaitingCount { get; private set; }
+    public int MineCount { get; private set; }
 
     public async Task<IActionResult> OnGetAsync()
     {
@@ -29,6 +30,7 @@ public class IndexModel(PriorAuthDb db, PlanClock clock, ServiceRequirementCatal
         var query = db.AuthorizationRequests.AsNoTracking();
         var open = query.Where(r => r.Status == AuthorizationStatus.Pended || r.Status == AuthorizationStatus.InformationRequested);
         WaitingCount = await open.CountAsync();
+        MineCount = await open.CountAsync(r => r.AssignedTo == me.Account);
         query = Show switch
         {
             "mine" => open.Where(r => r.AssignedTo == me.Account),
@@ -44,7 +46,8 @@ public class IndexModel(PriorAuthDb db, PlanClock clock, ServiceRequirementCatal
             .Select(r => new { r.Id, r.ReceivedAtUtc, r.MemberName, r.ServiceSystem, r.ServiceCode, r.ServiceName, r.ReviewType, r.Status, r.AssignedTo, r.AssignedToName })
             .ToListAsync();
         Rows = page.Select(r => new Row(r.Id, clock.LocalTime(r.ReceivedAtUtc), r.MemberName, r.ServiceCode, r.ServiceName,
-            ProgramOf(catalog, r.ServiceSystem, r.ServiceCode), r.ReviewType, r.Status, r.AssignedToName, r.AssignedTo == me.Account)).ToList();
+            ProgramOf(catalog, r.ServiceSystem, r.ServiceCode), r.ReviewType, r.Status, r.AssignedToName, r.AssignedTo == me.Account,
+            clock.UtcNow - r.ReceivedAtUtc)).ToList();
         return Page();
     }
 
@@ -55,6 +58,21 @@ public class IndexModel(PriorAuthDb db, PlanClock clock, ServiceRequirementCatal
             .Select(s => s.Program).Where(p => !string.IsNullOrWhiteSpace(p)).Distinct().Order().ToList();
         return programs.Count == 0 ? "Not on the list" : string.Join(" or ", programs);
     }
+
+    /// <summary>A length of time in plain words, rounded down: "just now", "40 minutes", "3 hours", "2 days".</summary>
+    public static string Span(TimeSpan span) => span switch
+    {
+        { TotalMinutes: < 1 } => "just now",
+        { TotalMinutes: < 2 } => "1 minute",
+        { TotalHours: < 1 } => $"{(int)span.TotalMinutes} minutes",
+        { TotalHours: < 2 } => "1 hour",
+        { TotalDays: < 1 } => $"{(int)span.TotalHours} hours",
+        { TotalDays: < 2 } => "1 day",
+        _ => $"{(int)span.TotalDays} days",
+    };
+
+    /// <summary>"just now" or "3 hours ago".</summary>
+    public static string Ago(TimeSpan span) => span.TotalMinutes < 1 ? "just now" : $"{Span(span)} ago";
 
     public static string Describe(ReviewType? review) => review switch
     {

@@ -2,38 +2,44 @@
 @model IndexModel
 @{
     ViewData["Title"] = "Review queue";
-    var tabs = new[] { ("waiting", "Waiting"), ("mine", "Mine"), ("decided", "Decided"), ("all", "All") };
+    var tabs = new (string Key, string Label, int? Count)[] { ("waiting", "Waiting", Model.WaitingCount), ("mine", "Mine", Model.MineCount), ("decided", "Decided", null), ("all", "All", null) };
+    var open = Model.Show is "waiting" or "mine";
 }
 <h1>Review queue</h1>
-<p class="muted">@Model.WaitingCount waiting for a decision or for the provider. Times are the plan's local time.</p>
+<p class="lede">@(Model.WaitingCount == 1 ? "1 request is" : $"{Model.WaitingCount} requests are") waiting for a decision or for the provider. Oldest first. Times are the plan's local time.</p>
 <nav class="tabs" aria-label="Which requests">
-  @foreach (var (key, label) in tabs)
+  @foreach (var tab in tabs)
   {
-    <a href="/?show=@key" aria-current="@(Model.Show == key ? "page" : null)">@label</a>
+    <a href="/?show=@tab.Key" aria-current="@(Model.Show == tab.Key ? "page" : null)">@tab.Label@if (tab.Count is { } count) {<span class="count num">@count</span>}</a>
   }
 </nav>
+<div class="card table-card">
 @if (Model.Rows.Count == 0)
 {
-  <p>@(Model.Show switch { "mine" => "You have not claimed any requests. Open one from Waiting and claim it.", "decided" => "Nothing has been decided yet.", _ => "Nothing is waiting. New requests appear here as providers send them." })</p>
+  <p class="empty">@(Model.Show switch { "mine" => "You have not claimed any requests. Open one from Waiting and claim it.", "decided" => "Nothing has been decided yet.", "all" => "No requests yet. They appear here as providers send them.", _ => "Nothing is waiting. New requests appear here as providers send them." })</p>
 }
 else
 {
-  <table>
-    <thead><tr><th>Received</th><th>Member</th><th>Service</th><th class="hide-narrow">Program</th><th class="hide-narrow">Review</th><th>Status</th><th>Working on it</th></tr></thead>
+  <table class="queue">
+    <thead><tr><th>Member and service</th><th>Received</th><th class="hide-narrow">Program</th><th class="hide-narrow">Review</th><th>Status</th><th>Working on it</th></tr></thead>
     <tbody>
     @foreach (var row in Model.Rows)
     {
       <tr>
-        <td>@row.ReceivedLocal.ToString("d MMM, h:mm tt")</td>
-        <td><a href="/requests/@row.Id">@row.MemberName</a></td>
-        <td>@row.ServiceName <span class="muted">@row.ServiceCode</span></td>
+        <td><a class="member" href="/requests/@row.Id">@row.MemberName</a><br>@row.ServiceName <span class="muted">@row.ServiceCode</span></td>
+        <td class="num"><span class="nowrap">@row.ReceivedLocal.ToString("d MMM, h:mm tt")</span><br><span class="muted">@IndexModel.Ago(row.Age)</span></td>
         <td class="hide-narrow">@row.Program</td>
         <td class="hide-narrow">@IndexModel.Describe(row.ReviewType)</td>
-        <td class="status @row.Status">@IndexModel.Describe(row.Status)</td>
-        <td>@(row.Mine ? "You" : row.AssignedToName ?? "")</td>
+        <td><span class="pill @row.Status">@IndexModel.Describe(row.Status)</span></td>
+        <td>
+          @if (row.Mine) { <span class="pill you">You</span> }
+          else if (row.AssignedToName is not null) { @row.AssignedToName }
+          else if (open) { <span class="pill unclaimed">No one yet</span> }
+        </td>
       </tr>
     }
     </tbody>
   </table>
-  @if (Model.Rows.Count == IndexModel.PageSize) { <p class="muted">Showing the first @IndexModel.PageSize.</p> }
 }
+</div>
+@if (Model.Rows.Count == IndexModel.PageSize) { <p class="muted">Showing the first @IndexModel.PageSize.</p> }

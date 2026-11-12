@@ -3,6 +3,8 @@
 @{
     var me = User.CurrentStaff();
     var devSignIn = StaffSignIn.Mode(Config, Environment) == StaffSignInMode.Development;
+    var path = Context.Request.Path.Value ?? "/";
+    string? Current(bool here) => here ? "page" : null;
 }
 <!doctype html>
 <html lang="en">
@@ -11,68 +13,183 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>@(ViewData["Title"] is string title ? $"{title} · " : "")Prior authorization</title>
 <style>
-  :root { --bg:#fff; --fg:#1c1c1c; --muted:#5c5c5c; --line:#cfcfcf; --card:#f6f6f4; --accent:#0b5cad; --ok:#1b6e3c; --bad:#a3262a; --warn:#7a5200; --warnbg:#fff3cd; }
-  @@media (prefers-color-scheme: dark) { :root { --bg:#17171a; --fg:#ececec; --muted:#a8a8a8; --line:#3d3d42; --card:#222226; --accent:#7db8f2; --ok:#7fd39f; --bad:#f09595; --warn:#f0cf7a; --warnbg:#3a3112; } }
+  :root {
+    --page:#eef1f4; --surface:#fff; --ink:#15202c; --muted:#56616e; --line:#d7dce2; --soft:#f6f8fa;
+    --bar:#13263a; --bar-ink:#e9eef4; --bar-muted:#9fb0c2; --mark:#e8a33d;
+    --accent:#1d5ca6; --accent-ink:#fff; --accent-soft:#e7eef8;
+    --ok:#156b3c; --ok-soft:#e3f2e9; --bad:#b0281d; --bad-soft:#fbe9e7;
+    --warn:#865600; --warn-soft:#fdf1d3; --wait:#4f3fa8; --wait-soft:#ecebfa;
+    --radius:10px; --shadow:0 1px 2px rgba(21,32,44,.06);
+  }
+  @@media (prefers-color-scheme: dark) { :root {
+    --page:#0f151c; --surface:#18212b; --ink:#e7ecf1; --muted:#a2adb9; --line:#2e3a47; --soft:#1e2833;
+    --bar:#0b1219; --bar-ink:#e7ecf1; --bar-muted:#8d9cab;
+    --accent:#7fb2ec; --accent-ink:#0b1219; --accent-soft:#1d3047;
+    --ok:#7fd3a0; --ok-soft:#173326; --bad:#f39b92; --bad-soft:#3a1d1b;
+    --warn:#f0c870; --warn-soft:#382c12; --wait:#b9b0f5; --wait-soft:#27244a; --shadow:none;
+  } }
   * { box-sizing: border-box; }
-  body { font: 15px/1.5 system-ui, sans-serif; margin: 0 auto; padding: 16px; max-width: 1100px; background: var(--bg); color: var(--fg); }
-  header { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; justify-content: space-between; border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 14px; }
-  header nav { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
-  header .who { color: var(--muted); font-size: 13px; }
-  h1 { font-size: 20px; margin: 0 0 12px; } h2 { font-size: 16px; margin: 18px 0 8px; }
-  a { color: var(--accent); }
-  .brand { font-weight: 700; color: var(--fg); text-decoration: none; }
-  .banner { background: var(--warnbg); color: var(--warn); border: 1px solid var(--line); padding: 8px 12px; border-radius: 6px; margin-bottom: 14px; font-size: 13px; }
+  html { background: var(--page); }
+  body { margin: 0; font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: var(--page); }
+  a { color: var(--accent); text-underline-offset: 2px; }
+  :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  .num { font-variant-numeric: tabular-nums; }
   .muted { color: var(--muted); font-size: 13px; }
-  .notice { border-left: 4px solid var(--ok); background: var(--card); padding: 8px 12px; margin-bottom: 12px; }
-  .problem { border-left: 4px solid var(--bad); background: var(--card); padding: 8px 12px; margin-bottom: 12px; color: var(--bad); }
-  button, input, select, textarea { font: inherit; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
-  button { cursor: pointer; } button:hover { border-color: var(--accent); }
-  button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  button.link { border: 0; background: none; color: var(--accent); padding: 0; text-decoration: underline; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
+
+  /* Top bar: where you are, and who you are signed in as. */
+  .topbar { background: var(--bar); color: var(--bar-ink); }
+  .topbar .wrap { display: flex; align-items: center; gap: 24px; min-height: 56px; flex-wrap: wrap; }
+  .brand { color: var(--bar-ink); font-weight: 700; text-decoration: none; letter-spacing: .01em; display: flex; align-items: center; gap: 10px; }
+  .brand::before { content: ""; width: 10px; height: 22px; border-radius: 3px; background: var(--mark); }
+  .topbar nav { display: flex; gap: 4px; flex: 1; flex-wrap: wrap; }
+  .topbar nav a { color: var(--bar-muted); text-decoration: none; padding: 16px 10px 14px; border-bottom: 3px solid transparent; }
+  .topbar nav a:hover { color: var(--bar-ink); }
+  .topbar nav a[aria-current=page] { color: var(--bar-ink); border-bottom-color: var(--mark); }
+  .who { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--bar-muted); }
+  .who strong { color: var(--bar-ink); font-weight: 600; }
+  .who button { background: transparent; color: var(--bar-ink); border: 1px solid var(--bar-muted); padding: 4px 10px; border-radius: 6px; font: inherit; cursor: pointer; }
+  .who button:hover { border-color: var(--bar-ink); }
+  .banner { background: var(--warn-soft); color: var(--warn); font-size: 13px; padding: 7px 0; border-bottom: 1px solid var(--line); }
+
+  main.wrap { padding-top: 28px; padding-bottom: 48px; }
+  .nowrap { white-space: nowrap; }
+  .spaced { margin-top: 28px; } .spaced-sm { margin-top: 14px; margin-bottom: 0; }
+  .table-card.whole { border-top: 1px solid var(--line); border-radius: var(--radius); }
+  h1 { font-size: 24px; line-height: 1.25; margin: 0 0 4px; letter-spacing: -.01em; }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  .lede { color: var(--muted); margin: 0 0 18px; }
+  .back { display: inline-block; margin-bottom: 12px; font-size: 14px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; margin: 0 0 16px; box-shadow: var(--shadow); }
+  .card > h2:first-child { margin-top: 0; }
+
+  .notice, .problem { border-radius: var(--radius); padding: 10px 14px; margin: 0 0 16px; font-weight: 500; }
+  .notice { background: var(--ok-soft); color: var(--ok); }
+  .problem { background: var(--bad-soft); color: var(--bad); }
+
+  /* Status labels: the colour repeats the words, never replaces them. */
+  .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; white-space: nowrap; background: var(--soft); color: var(--muted); }
+  .pill.Pended { background: var(--warn-soft); color: var(--warn); }
+  .pill.InformationRequested { background: var(--wait-soft); color: var(--wait); }
+  .pill.Approved { background: var(--ok-soft); color: var(--ok); }
+  .pill.Denied { background: var(--bad-soft); color: var(--bad); }
+  .pill.unclaimed { background: transparent; border: 1px dashed var(--line); color: var(--muted); font-weight: 500; }
+  .pill.you { background: var(--accent-soft); color: var(--accent); }
+
+  /* Buttons: one main action per form; Deny is red so it is never clicked by habit. */
+  button, input, select, textarea { font: inherit; color: var(--ink); }
+  input, select, textarea { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); width: 100%; }
+  input[type=date] { width: auto; }
+  textarea { min-height: 5.5rem; resize: vertical; }
+  label { font-weight: 600; font-size: 14px; }
+  .field { display: grid; gap: 6px; margin-bottom: 14px; }
+  .field .muted { font-weight: 400; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 8px 16px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font-weight: 600; cursor: pointer; text-decoration: none; }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .btn.approve { background: var(--ok); border-color: var(--ok); color: var(--surface); }
+  .btn.deny { background: var(--bad); border-color: var(--bad); color: var(--surface); }
+  .btn.primary:hover, .btn.approve:hover, .btn.deny:hover { filter: brightness(1.08); }
+  .actions-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .row input[type=text], .row select { flex: 1; min-width: 180px; }
+
+  /* Queue */
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 0; overflow-x: auto; }
+  .tabs a { padding: 10px 14px; text-decoration: none; color: var(--muted); font-weight: 600; border-bottom: 3px solid transparent; margin-bottom: -1px; white-space: nowrap; }
+  .tabs a:hover { color: var(--ink); }
+  .tabs a[aria-current=page] { color: var(--accent); border-bottom-color: var(--accent); }
+  .count { display: inline-block; min-width: 22px; padding: 0 6px; margin-left: 6px; border-radius: 999px; background: var(--soft); color: var(--muted); font-size: 12px; text-align: center; }
+  .tabs a[aria-current=page] .count { background: var(--accent-soft); color: var(--accent); }
+  .table-card { padding: 0; overflow-x: auto; border-top-left-radius: 0; border-top-right-radius: 0; border-top: 0; }
   table { border-collapse: collapse; width: 100%; font-size: 14px; }
-  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
-  th { color: var(--muted); font-weight: 600; font-size: 13px; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin: 10px 0; }
-  .status { font-weight: 600; } .Approved { color: var(--ok); } .Denied { color: var(--bad); } .Pended, .InformationRequested { color: var(--warn); }
-  .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 8px; } .row input[type=text], .row select { flex: 1; min-width: 180px; }
-  .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
-  .tabs a { padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; text-decoration: none; font-size: 13px; }
-  .tabs a[aria-current=page] { background: var(--accent); color: var(--bg); border-color: var(--accent); }
-  dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; }
-  dl.facts dt { color: var(--muted); } dl.facts dd { margin: 0; }
-  ul { margin: 6px 0 0; padding-left: 18px; }
-  textarea { width: 100%; min-height: 6rem; }
-  @@media (max-width: 640px) { dl.facts { grid-template-columns: 1fr; } .hide-narrow { display: none; } }
+  th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  thead th { font-size: 12px; font-weight: 600; color: var(--muted); background: var(--soft); }
+  tbody tr:last-child td { border-bottom: 0; }
+  .queue tbody tr { position: relative; }
+  .queue tbody tr:hover { background: var(--soft); }
+  .queue .member { font-weight: 600; text-decoration: none; color: var(--ink); }
+  .queue .member::after { content: ""; position: absolute; inset: 0; } /* the whole row opens the request */
+  .queue .member:focus-visible { outline: none; }
+  .queue tbody tr:has(.member:focus-visible) { outline: 3px solid var(--accent); outline-offset: -3px; }
+  .empty { padding: 40px 20px; text-align: center; color: var(--muted); }
+
+  /* Request page: what was asked on the left, what to do about it on the right. */
+  .titlebar { display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; margin-bottom: 18px; }
+  .titlebar .pill { font-size: 14px; padding: 4px 14px; }
+  .split { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 20px; align-items: start; }
+  .split.single { grid-template-columns: minmax(0, 1fr); max-width: 860px; }
+  .side { position: sticky; top: 16px; }
+  dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 8px 20px; margin: 0; }
+  dl.facts dt { color: var(--muted); font-size: 14px; } dl.facts dd { margin: 0; }
+  .doc + .doc { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 14px; }
+  .doc-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: baseline; }
+  .doc-head a { font-weight: 600; }
+  .doc pre { white-space: pre-wrap; word-break: break-word; font: inherit; font-size: 14px; background: var(--soft); border-radius: 8px; padding: 12px 14px; margin: 10px 0 0; max-height: 28rem; overflow: auto; }
+  .timeline { list-style: none; margin: 0; padding: 0; }
+  .timeline li { position: relative; padding: 0 0 14px 20px; border-left: 2px solid var(--line); margin-left: 5px; }
+  .timeline li:last-child { padding-bottom: 0; border-left-color: transparent; }
+  .timeline li::before { content: ""; position: absolute; left: -7px; top: 4px; width: 12px; height: 12px; border-radius: 50%; background: var(--surface); border: 2px solid var(--accent); }
+  .holder { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+
+  /* The decision: pick one outcome, then see only its form. */
+  .choices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 16px; padding: 0; border: 0; }
+  .choices legend { font-weight: 600; font-size: 14px; margin-bottom: 8px; padding: 0; }
+  .choices label { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; font-weight: 600; }
+  .choices input { width: auto; margin: 0; accent-color: var(--accent); }
+  .choices label:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+  .outcome { border-top: 1px solid var(--line); padding-top: 16px; }
+  .outcome + .outcome { margin-top: 16px; }
+  .outcome h3 { font-size: 15px; margin: 0 0 12px; }
+  @@supports selector(:has(*)) {
+    .decide .outcome { display: none; }
+    .decide:has(#choose-approve:checked) #outcome-approve,
+    .decide:has(#choose-changes:checked) #outcome-changes,
+    .decide:has(#choose-deny:checked) #outcome-deny,
+    .decide:has(#choose-ask:checked) #outcome-ask { display: block; margin-top: 0; }
+  }
+
+  @@media (max-width: 900px) { .split { grid-template-columns: minmax(0, 1fr); } .side { position: static; } }
+  @@media (max-width: 640px) {
+    dl.facts { grid-template-columns: 1fr; gap: 2px; } dl.facts dd { margin-bottom: 8px; }
+    .hide-narrow { display: none; } .who .account { display: none; } .choices { grid-template-columns: 1fr; }
+    th, td { padding: 10px 12px; }
+  }
+  @@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
 </style>
 </head>
 <body>
-<header>
-  <nav>
+<header class="topbar">
+  <div class="wrap">
     <a class="brand" href="/">Prior authorization</a>
-    @if (me?.WorksQueue == true) { <a href="/">Review queue</a> }
-    @if (me?.Has(StaffRole.Admin) == true) { <a href="/providers">Provider systems</a> }
-    <a href="/developers.html">Developer guide</a>
-  </nav>
-  @if (me is not null)
-  {
-    <div class="who">
-      Signed in as <strong>@me.DisplayName</strong> (@me.Account) ·
-      @string.Join(", ", me.Roles.Order().Select(r => r.Describe()))
-      @if (devSignIn)
-      {
-        <form method="post" action="/staff/sign-out" style="display:inline"><button class="link" type="submit">Switch test user</button></form>
-      }
-    </div>
-  }
+    <nav aria-label="Portal">
+      @if (me?.WorksQueue == true) { <a href="/" aria-current="@Current(path == "/" || path.StartsWith("/requests"))">Review queue</a> }
+      @if (me?.Has(StaffRole.Admin) == true) { <a href="/providers" aria-current="@Current(path.StartsWith("/providers"))">Provider systems</a> }
+      <a href="/developers.html">Developer guide</a>
+    </nav>
+    @if (me is not null)
+    {
+      <div class="who">
+        <span>
+          Signed in as <strong>@me.DisplayName</strong> <span class="account">(@me.Account)</span><br>
+          @string.Join(", ", me.Roles.Order().Select(r => r.Describe()))
+        </span>
+        @if (devSignIn)
+        {
+          <form method="post" action="/staff/sign-out"><button type="submit">Switch test user</button></form>
+        }
+      </div>
+    }
+  </div>
 </header>
-@if (devSignIn)
-{
-  <div class="banner"><b>Development sign-in.</b> Test users stand in for Windows sign-in. Not ready for real member data: there is no audit log yet.</div>
-}
-else
-{
-  <div class="banner"><b>Not ready for real member data.</b> There is no audit log yet.</div>
-}
+<div class="banner">
+  <div class="wrap">
+    @if (devSignIn) { <b>Development sign-in.</b> <text>Test users stand in for Windows sign-in. Not ready for real member data: there is no audit log yet.</text> }
+    else { <b>Not ready for real member data.</b> <text>There is no audit log yet.</text> }
+  </div>
+</div>
+<main class="wrap">
 @RenderBody()
+</main>
 </body>
 </html>

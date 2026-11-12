@@ -53,6 +53,20 @@ public class PortalTests(ApiFactory factory) : IClassFixture<ApiFactory>, IAsync
     }
 
     [Fact]
+    public async Task The_request_page_shows_a_short_text_document_so_the_reviewer_can_read_it_beside_the_decision()
+    {
+        var document = $$"""
+            { "resource": { "resourceType": "DocumentReference", "status": "current",
+                "content": [{ "attachment": { "contentType": "text/plain", "title": "Answers", "data": "{{Convert.ToBase64String(Encoding.UTF8.GetBytes("Diagnosis: <synthetic> & severe"))}}" } }] } }
+            """;
+        var id = await NewPendedRequest(document);
+
+        var page = await factory.SignedInAs(ApiFactory.ClinicianAccount).GetStringAsync($"/requests/{id}");
+
+        Assert.Contains("Diagnosis: &lt;synthetic&gt; &amp; severe", page);
+    }
+
+    [Fact]
     public async Task A_coordinator_sees_no_decision_forms_but_can_ask_for_information()
     {
         var id = await NewPendedRequest();
